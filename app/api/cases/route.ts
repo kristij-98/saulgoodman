@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { IntakeSchema } from '@/shared/schema/extractor.zod';
@@ -6,7 +5,28 @@ import { IntakeSchema } from '@/shared/schema/extractor.zod';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const validated = IntakeSchema.parse(body);
+
+    // Backward compatibility: Normalize camelCase keys to snake_case
+    const payload = {
+      ...body,
+      website_url: body.website_url ?? body.websiteUrl,
+      state_province: body.state_province ?? body.stateProvince,
+      what_they_sell: body.what_they_sell ?? body.whatTheySell,
+    };
+
+    const result = IntakeSchema.safeParse(payload);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid Request', 
+          issues: process.env.NODE_ENV !== 'production' ? result.error.issues : undefined 
+        }, 
+        { status: 400 }
+      );
+    }
+
+    const validated = result.data;
 
     const { 
       website_url, 
@@ -22,12 +42,13 @@ export async function POST(req: Request) {
         location: `${city}, ${state_province}`,
         whatTheySell: what_they_sell,
         vitals: vitals as any,
-        proInputs: body // Store full body as pro inputs for simplicity or separate if strict
+        proInputs: body // Store full original body
       }
     });
 
     return NextResponse.json(newCase);
   } catch (error) {
-    return NextResponse.json({ error: 'Invalid Request' }, { status: 400 });
+    console.error("Create case error:", error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
