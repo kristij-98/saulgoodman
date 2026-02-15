@@ -1,181 +1,122 @@
 import { ExtractedData } from "../shared/schema/extractor.zod";
 
 export interface ScoreResult {
-  confidence: "HIGH" | "MEDIUM" | "LOW";
-
-  marketAverages: {
-    avg_ticket: number | null;
-    avg_trip_fee: number | null;
-    membership_adoption_rate: number;
-    warranty_adoption_rate: number;
+  confidence: "HIGH" | "MED" | "LOW";
+  price_corridor: "low" | "mid" | "high" | "unknown";
+  patterns: {
+    membership_common: boolean;
+    fees_common: boolean;
+    warranty_common: boolean;
   };
 
-  clientPosition: {
-    ticket_position: "below" | "aligned" | "above" | "unknown";
-    trip_fee_position: "below" | "aligned" | "above" | "unknown";
-    membership_position: "missing" | "aligned" | "strong";
-    warranty_position: "missing" | "aligned" | "strong";
+  // NEW: make money unavoidable
+  inputs_used: {
+    jobs_per_month: number;
+    avg_ticket: number;
   };
 
-  delta: {
-    ticket_gap: number | null;
-    trip_fee_gap: number | null;
-    membership_gap_score: number;
-    warranty_gap_score: number;
+  // NEW: ranges (because reality)
+  leaks: {
+    per_job_low: number;
+    per_job_high: number;
+    per_month_low: number;
+    per_month_high: number;
+    per_year_low: number;
+    per_year_high: number;
   };
+
+  // keep the old upside (still useful)
+  upside: {
+    potential_revenue_increase: string;
+    description: string;
+  };
+
+  assumptions: string[];
 }
 
-function extractNumber(str: string | null | undefined): number | null {
-  if (!str) return null;
-  const match = str.match(/\$?(\d+(\.\d+)?)/);
-  return match ? parseFloat(match[1]) : null;
+function clampNumber(n: any, fallback: number) {
+  const x = Number(n);
+  return Number.isFinite(x) ? x : fallback;
 }
 
-function average(nums: number[]): number | null {
-  if (nums.length === 0) return null;
-  return nums.reduce((a, b) => a + b, 0) / nums.length;
-}
+export function computeBenchmark(clientData: any, extracted: ExtractedData): ScoreResult {
+  const competitorCount = extracted.competitors.length;
+  const pricingEvidenceCount = extracted.competitors.filter(c => (c.pricing_signals || []).length > 0).length;
 
-export function computeBenchmark(
-  clientData: any,
-  extracted: ExtractedData
-): ScoreResult {
-  const competitors = extracted.competitors;
-  const competitorCount = competitors.length;
+  // 1) Confidence
+  let confidence: "HIGH" | "MED" | "LOW" = "LOW";
+  if (competitorCount >= 5 && pricingEvidenceCount >= 3) confidence = "HIGH";
+  else if (competitorCount >= 3) confidence = "MED";
 
-  // ----------------------------------------
-  // CONFIDENCE
-  // ----------------------------------------
-  const pricingEvidenceCount = competitors.filter(
-    (c) => c.pricing_signals.length > 0
-  ).length;
+  // 2) Pattern recognition
+  const membershipCount = extracted.competitors.filter(c => !!c.membership_offer).length;
+  const feeCount = extracted.competitors.filter(c => !!c.trip_fee).length;
+  const warrantyCount = extracted.competitors.filter(c => !!c.warranty_offer).length;
 
-  let confidence: "HIGH" | "MEDIUM" | "LOW" = "LOW";
+  const patterns = {
+    membership_common: competitorCount ? membershipCount > competitorCount * 0.3 : false,
+    fees_common: competitorCount ? feeCount > competitorCount * 0.4 : false,
+    warranty_common: competitorCount ? warrantyCount > competitorCount * 0.5 : false
+  };
 
-  if (competitorCount >= 6 && pricingEvidenceCount >= 4) {
-    confidence = "HIGH";
-  } else if (competitorCount >= 3) {
-    confidence = "MEDIUM";
-  }
+  // 3) Inputs from intake (make it personal)
+  const jobsMin = clampNumber(clientData?.jobs_min, 0);
+  const jobsMax = clampNumber(clientData?.jobs_max, jobsMin);
+  const ticketMin = clampNumber(clientData?.ticket_min, 0);
+  const ticketMax = clampNumber(clientData?.ticket_max, ticketMin);
 
-  // ----------------------------------------
-  // MARKET AVERAGES
-  // ----------------------------------------
-  const competitorTickets: number[] = [];
-  const competitorTripFees: number[] = [];
+  const jobsPerMonth = Math.max(0, Math.round((jobsMin + jobsMax) / 2));
+  const avgTicket = Math.max(0, (ticketMin + ticketMax) / 2);
 
-  competitors.forEach((c) => {
-    c.pricing_signals.forEach((p) => {
-      const n = extractNumber(p);
-      if (n) competitorTickets.push(n);
-    });
+  // 4) Leak model (simple, believable, and ranges)
+  // Conservative: 10–25% revenue lift range based on market patterns.
+  // Higher if memberships common + fees common.
+  let lowPct = 0.10;
+  let highPct = 0.25;
 
-    const fee = extractNumber(c.trip_fee);
-    if (fee) competitorTripFees.push(fee);
-  });
+  if (patterns.membership_common) highPct += 0.05;
+  if (patterns.fees_common) highPct += 0.03;
+  if (patterns.warranty_common) highPct += 0.02;
 
-  const avg_ticket = average(competitorTickets);
-  const avg_trip_fee = average(competitorTripFees);
+  // cap high to stay believable
+  highPct = Math.min(highPct, 0.35);
 
-  const membership_adoption_rate =
-    competitorCount === 0
-      ? 0
-      : competitors.filter((c) => c.membership_offer).length /
-        competitorCount;
+  const perJobLow = avgTicket * lowPct;
+  const perJobHigh = avgTicket * highPct;
 
-  const warranty_adoption_rate =
-    competitorCount === 0
-      ? 0
-      : competitors.filter((c) => c.warranty_offer).length /
-        competitorCount;
+  const perMonthLow = perJobLow * jobsPerMonth;
+  const perMonthHigh = perJobHigh * jobsPerMonth;
 
-  // ----------------------------------------
-  // CLIENT POSITIONING
-  // ----------------------------------------
-  const clientTicket =
-    (clientData.ticket_min + clientData.ticket_max) / 2 || null;
+  const perYearLow = perMonthLow * 12;
+  const perYearHigh = perMonthHigh * 12;
 
-  const clientTripFee = extractNumber(clientData.trip_fee);
+  const assumptions: string[] = [
+    `Jobs/month estimated from intake: avg(jobs_min, jobs_max) = ${jobsPerMonth}`,
+    `Avg ticket estimated from intake: avg(ticket_min, ticket_max) = ${Math.round(avgTicket)}`,
+    `Leak % range used: ${(lowPct * 100).toFixed(0)}%–${(highPct * 100).toFixed(0)}% (adjusted by market patterns)`
+  ];
 
-  let ticket_position: "below" | "aligned" | "above" | "unknown" =
-    "unknown";
-
-  if (avg_ticket && clientTicket) {
-    if (clientTicket < avg_ticket * 0.9) ticket_position = "below";
-    else if (clientTicket > avg_ticket * 1.1) ticket_position = "above";
-    else ticket_position = "aligned";
-  }
-
-  let trip_fee_position: "below" | "aligned" | "above" | "unknown" =
-    "unknown";
-
-  if (avg_trip_fee && clientTripFee) {
-    if (clientTripFee < avg_trip_fee * 0.9) trip_fee_position = "below";
-    else if (clientTripFee > avg_trip_fee * 1.1) trip_fee_position = "above";
-    else trip_fee_position = "aligned";
-  }
-
-  const membership_position =
-    clientData.has_membership
-      ? membership_adoption_rate > 0.5
-        ? "aligned"
-        : "strong"
-      : "missing";
-
-  const warranty_position =
-    clientData.warranty
-      ? warranty_adoption_rate > 0.5
-        ? "aligned"
-        : "strong"
-      : "missing";
-
-  // ----------------------------------------
-  // DELTAS
-  // ----------------------------------------
-  const ticket_gap =
-    avg_ticket && clientTicket ? clientTicket - avg_ticket : null;
-
-  const trip_fee_gap =
-    avg_trip_fee && clientTripFee
-      ? clientTripFee - avg_trip_fee
-      : null;
-
-  const membership_gap_score =
-    clientData.has_membership
-      ? 0
-      : membership_adoption_rate > 0.4
-      ? 1
-      : 0;
-
-  const warranty_gap_score =
-    clientData.warranty
-      ? 0
-      : warranty_adoption_rate > 0.4
-      ? 1
-      : 0;
-
+  const prettyMid = Math.floor(((perMonthLow + perMonthHigh) / 2));
   return {
     confidence,
-
-    marketAverages: {
-      avg_ticket,
-      avg_trip_fee,
-      membership_adoption_rate,
-      warranty_adoption_rate,
+    price_corridor: pricingEvidenceCount > 0 ? "mid" : "unknown",
+    patterns,
+    inputs_used: {
+      jobs_per_month: jobsPerMonth,
+      avg_ticket: avgTicket
     },
-
-    clientPosition: {
-      ticket_position,
-      trip_fee_position,
-      membership_position,
-      warranty_position,
+    leaks: {
+      per_job_low: perJobLow,
+      per_job_high: perJobHigh,
+      per_month_low: perMonthLow,
+      per_month_high: perMonthHigh,
+      per_year_low: perYearLow,
+      per_year_high: perYearHigh
     },
-
-    delta: {
-      ticket_gap,
-      trip_fee_gap,
-      membership_gap_score,
-      warranty_gap_score,
+    upside: {
+      potential_revenue_increase: `$${prettyMid}/mo`,
+      description: "Conservative estimate based on your volume + ticket and market patterns (fees, memberships, warranties)."
     },
+    assumptions
   };
 }
