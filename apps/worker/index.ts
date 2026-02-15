@@ -1,6 +1,6 @@
 import PgBoss from 'pg-boss';
 import { PrismaClient } from '@prisma/client';
-import { GoogleGenerativeAI } from "@google/generativeai";
+import { GoogleGenAI } from "@google/genai";
 import { IntakeSchema, ExtractedDataSchema, ExtractedData } from '../../shared/schema/extractor.zod';
 import { computeBenchmark } from '../../lib/scoring';
 import { nanoid } from 'nanoid';
@@ -16,7 +16,7 @@ if (!DATABASE_URL || !GEMINI_API_KEY) {
 
 const prisma = new PrismaClient();
 const boss = new PgBoss(DATABASE_URL);
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 // --- PROMPTS ---
 const RESEARCH_PROMPT = `
@@ -73,14 +73,14 @@ async function runAuditJob(job: any) {
     const vitals = caseData.vitals as any;
     const query = `${caseData.what_they_sell} companies in ${caseData.location} pricing membership reviews`;
     
-    // Using standard model for stability with old SDK
-    const researchModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const researchResult = await ai.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`
+    });
     
-    const researchResult = await researchModel.generateContent(`SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`);
-    const researchResponse = researchResult.response;
-    const researchText = researchResponse.text();
+    const researchText = researchResult.text || "";
     
-    // Fallback: extracting any URL-like strings from text since old SDK doesn't support structured grounding metadata easily
+    // Fallback: extracting any URL-like strings from text
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const sourceUrls = researchText.match(urlRegex) || [];
 
@@ -96,16 +96,13 @@ async function runAuditJob(job: any) {
       ${sourceUrls.join(', ')}
     `;
 
-    const extractorModel = genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
-      generationConfig: { responseMimeType: "application/json" }
+    const extractorResult = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: EXTRACTOR_PROMPT + "\n\n" + extractorInput,
+        config: { responseMimeType: "application/json" }
     });
 
-    const extractorResult = await extractorModel.generateContent({
-        contents: [{ role: 'user', parts: [{ text: EXTRACTOR_PROMPT + "\n\n" + extractorInput }] }]
-    });
-
-    const extractedJsonRaw = extractorResult.response.text();
+    const extractedJsonRaw = extractorResult.text || "{}";
     let extractedData: ExtractedData;
     
     try {
@@ -132,16 +129,13 @@ async function runAuditJob(job: any) {
       benchmark: benchmark
     });
 
-    const composerModel = genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
-      generationConfig: { responseMimeType: "application/json" }
+    const composerResult = await ai.models.generateContent({
+         model: 'gemini-1.5-flash',
+         contents: COMPOSER_PROMPT + "\n\n" + composerInput,
+         config: { responseMimeType: "application/json" }
     });
 
-    const composerResult = await composerModel.generateContent({
-         contents: [{ role: 'user', parts: [{ text: COMPOSER_PROMPT + "\n\n" + composerInput }] }]
-    });
-
-    const reportContent = JSON.parse(composerResult.response.text());
+    const reportContent = JSON.parse(composerResult.text || "{}");
 
     // Final Report Payload Construction
     const finalReport = {
