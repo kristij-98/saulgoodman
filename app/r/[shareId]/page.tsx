@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { AlertTriangle, Check, X, ExternalLink, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ReportPage({ params }: { params: { shareId: string } }) {
   const report = await prisma.report.findUnique({
     where: { share_id: params.shareId },
