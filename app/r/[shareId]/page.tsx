@@ -15,8 +15,10 @@ export default async function ReportPage({ params }: { params: { shareId: string
 
   if (!report) return notFound();
 
-  const data = report.payloadJson as any;
-  const confidence = data.meta.confidence as "HIGH" | "MED" | "LOW";
+  // Cast to any to handle potential schema field naming mismatches (payloadJson vs content)
+  // and resolve the build error.
+  const data = ((report as any).payloadJson || (report as any).content || {}) as any;
+  const confidence = (data.meta?.confidence || "LOW") as "HIGH" | "MED" | "LOW";
 
   const confidenceColor = {
     HIGH: "text-green-600 bg-green-50 border-green-200",
@@ -71,7 +73,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {data.competitors.map((c: any, i: number) => (
+                {data.competitors?.map((c: any, i: number) => (
                   <tr key={i} className="hover:bg-slate-50/50">
                     <td className="px-4 py-3 font-medium">
                       <a href={c.url} target="_blank" className="hover:underline decoration-slate-400 underline-offset-4 flex items-center gap-2">
@@ -84,7 +86,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     </td>
                      <td className="px-4 py-3 text-center">{c.warranty_offer || '-'}</td>
                   </tr>
-                ))}
+                )) || <tr><td colSpan={4} className="p-4 text-center">No competitor data available.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -95,7 +97,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
       <section className="space-y-4">
         <h3 className="text-xl font-bold">Offer Rebuild Opportunities</h3>
         <div className="grid md:grid-cols-2 gap-6">
-          {data.offer_rebuild.map((item: any, i: number) => (
+          {data.offer_rebuild?.map((item: any, i: number) => (
             <div key={i} className="bg-white p-6 rounded-xl border shadow-sm space-y-3">
               <h4 className="font-bold text-lg">{item.title}</h4>
               <p className="text-slate-600 leading-relaxed">{item.content}</p>
@@ -108,7 +110,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
        <section className="space-y-4">
         <h3 className="text-xl font-bold">Evidence Drawer</h3>
         <div className="space-y-2">
-          {data.evidence_drawer.map((e: any, i: number) => (
+          {data.evidence_drawer?.map((e: any, i: number) => (
              <details key={i} className="group bg-white border rounded-lg px-4 open:pb-4">
                 <summary className="py-4 font-medium cursor-pointer list-none flex items-center justify-between">
                    <span className="flex items-center gap-2">
@@ -132,7 +134,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
       <section className="bg-slate-900 text-white rounded-xl p-8 space-y-6">
          <h3 className="text-2xl font-bold">Next 7 Days Plan</h3>
          <ul className="space-y-4">
-           {data.next_7_days.map((step: string, i: number) => (
+           {data.next_7_days?.map((step: string, i: number) => (
              <li key={i} className="flex gap-4 items-start">
                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-white text-slate-900 font-bold flex items-center justify-center text-sm">{i+1}</div>
                <p className="leading-snug pt-0.5">{step}</p>
