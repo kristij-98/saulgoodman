@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
@@ -10,5 +9,10 @@ export async function GET(req: Request, { params }: { params: { shareId: string 
   });
 
   if (!report) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json(report.payloadJson);
+  
+  // Cast to any to handle potential schema field naming mismatches (payloadJson vs content)
+  // and resolve the build error.
+  const data = (report as any).payloadJson || (report as any).content || {};
+  
+  return NextResponse.json(data);
 }
