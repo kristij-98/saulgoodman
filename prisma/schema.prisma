@@ -1,0 +1,39 @@
+datasource db {
+provider = "postgresql"
+url = env("DATABASE_URL")
+}
+generator client {
+provider = "prisma-client-js"
+}
+model Case {
+id String @id @default(uuid())
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+websiteUrl String
+location String
+whatTheySell String
+vitals Json
+proInputs Json
+jobs Job[]
+reports Report[]
+}
+model Job {
+id String @id @default(uuid())
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+caseId String
+status String
+stage String?
+progress Int @default(0)
+error String?
+finishedAt DateTime?
+case Case @relation(fields: [caseId], references: [id])
+}
+model Report {
+id String @id @default(uuid())
+createdAt DateTime @default(now())
+caseId String
+shareId String @unique
+payloadJson Json
+case Case @relation(fields: [caseId], references: [id])
+}
