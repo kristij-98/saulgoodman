@@ -1,3 +1,4 @@
+
 import PgBoss from 'pg-boss';
 import { PrismaClient } from '@prisma/client';
 import { GoogleGenAI } from "@google/genai";
@@ -73,16 +74,28 @@ async function runAuditJob(job: any) {
     const vitals = caseData.vitals as any;
     const query = `${caseData.what_they_sell} companies in ${caseData.location} pricing membership reviews`;
     
+    // Use Gemini 3 Flash Preview with Google Search Grounding
     const researchResult = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`
+      model: 'gemini-3-flash-preview',
+      contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`,
+      config: {
+        tools: [{ googleSearch: {} }]
+      }
     });
     
     const researchText = researchResult.text || "";
     
-    // Fallback: extracting any URL-like strings from text
+    // Extract URLs from Grounding Metadata (Best practice for Gemini 3)
+    const groundingChunks = researchResult.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const groundingUrls = groundingChunks
+      .map((c: any) => c.web?.uri)
+      .filter((u: any) => u);
+
+    // Fallback: extracting any URL-like strings from text if grounding misses something
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const sourceUrls = researchText.match(urlRegex) || [];
+    const textUrls = researchText.match(urlRegex) || [];
+    
+    const allSourceUrls = Array.from(new Set([...groundingUrls, ...textUrls]));
 
     await updateStage("Evidence Extraction", 40);
 
@@ -93,13 +106,16 @@ async function runAuditJob(job: any) {
       ${researchText}
       
       SOURCES FOUND:
-      ${sourceUrls.join(', ')}
+      ${allSourceUrls.join(', ')}
     `;
 
+    // Use Gemini 3 Flash Preview for structured data extraction
     const extractorResult = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: EXTRACTOR_PROMPT + "\n\n" + extractorInput,
-        config: { responseMimeType: "application/json" }
+        config: { 
+          responseMimeType: "application/json"
+        }
     });
 
     const extractedJsonRaw = extractorResult.text || "{}";
@@ -108,8 +124,14 @@ async function runAuditJob(job: any) {
     try {
       extractedData = ExtractedDataSchema.parse(JSON.parse(extractedJsonRaw));
     } catch (e) {
-      console.error("JSON Parse fail, retrying extraction...");
-      throw new Error("Failed to parse competitor data");
+      console.error("JSON Parse fail, retrying extraction with repair prompt...");
+      // Retry once with a fix prompt if JSON is broken
+       const retryResult = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `The previous JSON was invalid. Fix it to match this schema:\n${JSON.stringify(extractedJsonRaw)}`,
+        config: { responseMimeType: "application/json" }
+      });
+      extractedData = ExtractedDataSchema.parse(JSON.parse(retryResult.text || "{}"));
     }
 
     await updateStage("Benchmarking", 70);
@@ -129,8 +151,9 @@ async function runAuditJob(job: any) {
       benchmark: benchmark
     });
 
+    // Use Gemini 3 Pro Preview for complex creative writing (Report Generation)
     const composerResult = await ai.models.generateContent({
-         model: 'gemini-1.5-flash',
+         model: 'gemini-3-pro-preview',
          contents: COMPOSER_PROMPT + "\n\n" + composerInput,
          config: { responseMimeType: "application/json" }
     });
