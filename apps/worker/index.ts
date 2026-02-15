@@ -6,25 +6,29 @@ import { ReportSchema } from '../../shared/schema/report.zod';
 import { computeBenchmark } from '../../lib/scoring';
 import { nanoid } from 'nanoid';
 
-// --- CONFIG ---
+// ------------------------------------------------
+// CONFIG
+// ------------------------------------------------
 const DATABASE_URL = process.env.DATABASE_URL!;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 
 if (!DATABASE_URL || !GEMINI_API_KEY) {
   console.error("Missing env vars: DATABASE_URL or GEMINI_API_KEY");
-  (process as any).exit(1);
+  process.exit(1);
 }
 
 const prisma = new PrismaClient();
 const boss = new PgBoss(DATABASE_URL);
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-// --- HELPERS (Step 2: reliability) ---
+// ------------------------------------------------
+// HELPERS
+// ------------------------------------------------
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    p.then((v) => { clearTimeout(t); resolve(v); })
-     .catch((e) => { clearTimeout(t); reject(e); });
+    p.then(v => { clearTimeout(t); resolve(v); })
+     .catch(e => { clearTimeout(t); reject(e); });
   });
 }
 
@@ -32,13 +36,51 @@ function safeJsonParse(text: string): any | null {
   try { return JSON.parse(text); } catch { return null; }
 }
 
-// --- PROMPTS ---
-const RESEARCH_PROMPT = `
-You are a senior market researcher. Find 6-10 direct competitors for a specific business in a specific location.
-Focus on extracting SPECIFIC EVIDENCE of pricing, diagnostic fees, memberships, and warranties.
-If specific pricing isn't on the homepage, look for "pricing", "services", "membership", "financing", "warranty", or "about" pages.
+// ------------------------------------------------
+// PROMPTS
+// ------------------------------------------------
 
-Output format: Plain text with URLs and extracted raw snippets.
+const RESEARCH_PROMPT = `
+You are a forensic-grade competitive intelligence analyst.
+
+Collect REAL competitor evidence for a paid audit.
+
+DO NOT summarize.
+DO NOT give advice.
+ONLY extract factual evidence with URLs and snippets.
+
+Find 6–10 DIRECT competitors.
+
+PRIORITY DATA:
+1) Service/diagnostic/trip fees
+2) Published price ranges
+3) Membership/maintenance plans
+4) Warranty/guarantee terms
+5) Financing offers
+6) Premium positioning signals
+7) Review signals
+
+OUTPUT FORMAT:
+
+COMPETITOR:
+- name:
+- primary_url:
+- location_served:
+
+EVIDENCE:
+- [pricing] url: ... | snippet: "..."
+- [trip_fee] url: ... | snippet: "..."
+- [membership] url: ... | snippet: "..."
+- [warranty] url: ... | snippet: "..."
+- [financing] url: ... | snippet: "..."
+- [premium] url: ... | snippet: "..."
+- [reputation] url: ... | snippet: "..."
+
+NOTES:
+- pricing_visibility: public / partial / not_public
+- missing_data: list missing areas
+
+Repeat per competitor.
 `;
 
 const EXTRACTOR_JSON_SHAPE = `
@@ -53,14 +95,14 @@ const EXTRACTOR_JSON_SHAPE = `
       "membership_offer": null,
       "warranty_offer": null,
       "premium_signals": ["string"],
-      "evidence_ids": ["e1","e2"]
+      "evidence_ids": ["e1"]
     }
   ],
   "evidence": [
     {
       "id": "e1",
-      "source_url": "https://example.com/page",
-      "snippet": "raw text snippet copied from the page",
+      "source_url": "https://example.com",
+      "snippet": "raw copied snippet",
       "type": "pricing|service|reputation|guarantee|other"
     }
   ]
@@ -68,26 +110,25 @@ const EXTRACTOR_JSON_SHAPE = `
 `;
 
 const EXTRACTOR_PROMPT = `
-You are a strict data extractor.
+Convert the research into STRICT JSON.
 
-TASK:
-Convert the provided research text into JSON ONLY, matching EXACTLY the following shape:
+Match EXACTLY this structure:
 
 ${EXTRACTOR_JSON_SHAPE}
 
-RULES:
-- Return ONLY JSON. No markdown. No commentary.
-- NEVER omit keys. If unknown, use null for nullable fields and [] for arrays.
-- Every competitor should have evidence_ids (can be empty []).
-- Every evidence item MUST have id, source_url, snippet, type.
-- type MUST be one of: pricing, service, reputation, guarantee, other.
+Rules:
+- Return ONLY JSON.
+- Never omit keys.
+- Unknown values => null or [].
+- evidence.type must be pricing|service|reputation|guarantee|other.
 `;
 
-// Composer prompt stays blunt but JSON must match ReportSchema defaults
 const COMPOSER_PROMPT = `
-You are "Profit Leak Attorney", a confident, blunt, high-ticket consultant.
-Write a strategic audit report based on the provided client data, competitor analysis, and computed benchmarks.
-Tone: Expert, no-nonsense, "fixer" vibe. No fluff.
+You are "Profit Leak Attorney".
+
+You are a strategic fixer.
+
+Write a sharp, no-fluff audit.
 
 Return JSON with keys:
 - quick_verdict
@@ -100,7 +141,10 @@ Return JSON with keys:
 Return ONLY JSON.
 `;
 
-// --- WORKER LOGIC ---
+// ------------------------------------------------
+// WORKER
+// ------------------------------------------------
+
 async function runAuditJob(job: any) {
   const { caseId, jobId } = job.data;
   console.log(`[Job ${jobId}] Starting audit for Case ${caseId}`);
@@ -117,53 +161,69 @@ async function runAuditJob(job: any) {
       console.log(`[Job ${jobId}] ${stage} (${progress}%)`);
     };
 
-    // -------------------------
-    // STAGE 1: RESEARCH
-    // -------------------------
+    const vitals = caseData.vitals as any;
+    const base = `${caseData.whatTheySell} in ${caseData.location}`;
+
+    // ------------------------------------------------
+    // STAGE 1 — MULTI PASS RESEARCH
+    // ------------------------------------------------
     await updateStage("Competitor Discovery", 10);
 
-    const vitals = caseData.vitals as any;
-    const query = `${caseData.whatTheySell} companies in ${caseData.location} pricing membership reviews`;
+    const queries = [
+      `${base} pricing service call fee`,
+      `${base} membership maintenance plan`,
+      `${base} warranty guarantee`,
+      `${base} reviews rating competitors`
+    ];
 
-    const researchResult = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`,
-        config: { tools: [{ googleSearch: {} }] }
-      }),
-      45000,
-      "Research"
-    );
+    const researchChunks: string[] = [];
+    const sourceUrls: string[] = [];
 
-    const researchText = researchResult.text || "";
+    for (let i = 0; i < queries.length; i++) {
+      const res = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `SEARCH QUERY: ${queries[i]}\n\n${RESEARCH_PROMPT}`,
+          config: { tools: [{ googleSearch: {} }] }
+        }),
+        45000,
+        `Research Pass ${i + 1}`
+      );
 
-    const groundingChunks =
-      researchResult.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const txt = res.text || "";
+      researchChunks.push(`\n\n=== PASS ${i + 1} ===\n${txt}`);
 
-    const groundingUrls = groundingChunks
-      .map((c: any) => c.web?.uri)
-      .filter((u: any) => u);
+      const grounding =
+        res.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const textUrls = researchText.match(urlRegex) || [];
+      const groundingUrls = grounding
+        .map((c: any) => c.web?.uri)
+        .filter((u: any) => u);
 
-    const allSourceUrls = Array.from(new Set([...groundingUrls, ...textUrls]));
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const textUrls = txt.match(urlRegex) || [];
 
-    // -------------------------
-    // STAGE 2: EXTRACTION (Step 2 hardened)
-    // -------------------------
+      sourceUrls.push(...groundingUrls, ...textUrls);
+    }
+
+    const researchText = researchChunks.join("\n");
+    const allSourceUrls = Array.from(new Set(sourceUrls));
+
+    // ------------------------------------------------
+    // STAGE 2 — EXTRACTION
+    // ------------------------------------------------
     await updateStage("Evidence Extraction", 40);
 
     const extractorInput = `
 RAW RESEARCH:
 ${researchText}
 
-SOURCES FOUND:
-${allSourceUrls.join(', ')}
+SOURCE URLS:
+${allSourceUrls.join("\n")}
 `;
 
-    const callExtractor = async (prompt: string) => {
-      return await withTimeout(
+    const extractorCall = async (prompt: string) =>
+      await withTimeout(
         ai.models.generateContent({
           model: 'gemini-3-flash-preview',
           contents: prompt,
@@ -172,56 +232,47 @@ ${allSourceUrls.join(', ')}
         45000,
         "Extractor"
       );
-    };
 
     let extractedData: ExtractedData | null = null;
 
-    // Attempt 1
-    const extractorResult1 = await callExtractor(EXTRACTOR_PROMPT + "\n\n" + extractorInput);
-    const json1 = safeJsonParse(extractorResult1.text || "");
+    const attempt1 = await extractorCall(EXTRACTOR_PROMPT + "\n\n" + extractorInput);
+    const json1 = safeJsonParse(attempt1.text || "");
     if (json1) {
       try {
         extractedData = ExtractedDataSchema.parse(json1);
-      } catch (e) {
-        extractedData = null;
-      }
+      } catch {}
     }
 
-    // Attempt 2 (Repair)
     if (!extractedData) {
-      console.error("Extractor output invalid. Retrying with repair prompt...");
+      console.error("Extractor failed first pass. Retrying...");
       const repairPrompt =
-        `Your previous output was invalid or missing required keys.\n` +
-        `Return ONLY valid JSON matching EXACTLY this shape:\n${EXTRACTOR_JSON_SHAPE}\n\n` +
-        `Rules: never omit keys, unknown => null or [], type must be one of pricing|service|reputation|guarantee|other.\n\n` +
-        `Now re-extract from this input:\n${extractorInput}`;
+        `Fix output to EXACT schema:\n${EXTRACTOR_JSON_SHAPE}\n\n` +
+        `Return ONLY JSON.\n\n` +
+        extractorInput;
 
-      const extractorResult2 = await callExtractor(repairPrompt);
-      const json2 = safeJsonParse(extractorResult2.text || "");
+      const attempt2 = await extractorCall(repairPrompt);
+      const json2 = safeJsonParse(attempt2.text || "");
       if (json2) {
         try {
           extractedData = ExtractedDataSchema.parse(json2);
-        } catch (e) {
-          extractedData = null;
-        }
+        } catch {}
       }
     }
 
-    // Final fallback (never fail job)
     if (!extractedData) {
-      console.error("Extractor failed twice. Using empty extracted data fallback.");
-      extractedData = ExtractedDataSchema.parse({ competitors: [], evidence: [] });
+      console.error("Extractor failed twice. Using fallback.");
+      extractedData = { competitors: [], evidence: [] };
     }
 
-    // -------------------------
-    // STAGE 3: BENCHMARKING
-    // -------------------------
+    // ------------------------------------------------
+    // STAGE 3 — BENCHMARK
+    // ------------------------------------------------
     await updateStage("Benchmarking", 70);
     const benchmark = computeBenchmark(vitals, extractedData);
 
-    // -------------------------
-    // STAGE 4: COMPOSER
-    // -------------------------
+    // ------------------------------------------------
+    // STAGE 4 — COMPOSER
+    // ------------------------------------------------
     await updateStage("Report Composition", 85);
 
     const composerInput = JSON.stringify({
@@ -240,23 +291,16 @@ ${allSourceUrls.join(', ')}
       "Composer"
     );
 
-    let rawComposer: any = {};
-    try {
-      rawComposer = JSON.parse(composerResult.text || "{}");
-    } catch (e) {
-      console.error("Composer JSON parse failed. Using empty object.");
-      rawComposer = {};
-    }
-
+    const rawComposer = safeJsonParse(composerResult.text || "") || {};
     const reportContent = ReportSchema.parse(rawComposer);
 
-    // -------------------------
-    // FINAL REPORT
-    // -------------------------
+    // ------------------------------------------------
+    // SAVE REPORT
+    // ------------------------------------------------
     const finalReport = {
       meta: {
         generated_at: new Date().toISOString(),
-        confidence: benchmark.confidence,
+        confidence: benchmark.confidence
       },
       ...reportContent,
       benchmark_data: benchmark,
@@ -300,5 +344,5 @@ async function start() {
 
 start().catch(err => {
   console.error(err);
-  (process as any).exit(1);
+  process.exit(1);
 });
