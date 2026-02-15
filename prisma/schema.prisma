@@ -8,34 +8,36 @@ datasource db {
 }
 
 model Case {
-  id          String   @id @default(cuid())
-  websiteUrl  String
-  location    String
+  id           String   @id @default(cuid())
+  websiteUrl   String
+  location     String
   whatTheySell String
-  vitals      Json
-  proInputs   Json
+  vitals       Json
+  proInputs    Json
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobs         Job[]
+  reports      Report[]
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  caseId      String
+  status      String
+  stage       String?  // optional because some code may not set it yet
+  progress    Int      @default(0)
+
+  error       String?  // <-- ADD THIS (stores failure reason)
+
+  payloadJson Json?    // worker may store scraped/structured data here
+  finishedAt  DateTime?
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  jobs        Job[]
-  reports     Report[]
-}
-
-model Job {
-  id         String   @id @default(cuid())
-  caseId     String
-  status     String
-  stage      String?  // optional because some code may not set it yet
-  progress   Int      @default(0)
-
-  payloadJson Json?   // worker may store scraped/structured data here
-  finishedAt DateTime?
-
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  case       Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
 }
