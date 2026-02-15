@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { ExtractedDataSchema, ExtractedData } from '../../shared/schema/extractor.zod';
 import { ReportSchema } from '../../shared/schema/report.zod';
 import { computeBenchmark } from '../../lib/scoring';
-import { computeMarketDelta } from '../../lib/delta';
+import { computeStrategicProfile } from '../../lib/strategy';
 import { nanoid } from 'nanoid';
 
 // ------------------------------------------------
@@ -43,8 +43,11 @@ function safeJsonParse(text: string): any | null {
 
 const RESEARCH_PROMPT = `
 You are a forensic-grade competitive intelligence analyst.
+
 Collect REAL competitor evidence for a paid audit.
-DO NOT summarize. DO NOT give advice.
+
+DO NOT summarize.
+DO NOT give advice.
 ONLY extract factual evidence with URLs and snippets.
 
 Find 6–10 DIRECT competitors.
@@ -109,6 +112,7 @@ const EXTRACTOR_JSON_SHAPE = `
 
 const EXTRACTOR_PROMPT = `
 Convert the research into STRICT JSON.
+
 Match EXACTLY this structure:
 
 ${EXTRACTOR_JSON_SHAPE}
@@ -123,23 +127,22 @@ Rules:
 const COMPOSER_PROMPT = `
 You are "Profit Leak Attorney".
 
+You are not a marketer.
 You are a strategic cross-examiner.
 
-You receive:
-- client vitals
-- competitor evidence
-- benchmark scoring
-- structured market delta
+You have:
+- Client vitals
+- Competitor evidence
+- Benchmark scoring
+- Strategic profile
 
-Produce a sharp, specific audit.
+Produce a sharp audit.
 
-Rules:
-- Reference market contrast.
-- Call out pricing gaps directly.
-- Call out missing memberships.
-- Call out warranty weakness.
-- Use structured reasoning.
-- No fluff.
+RULES:
+- Compare client vs market directly.
+- No generic advice.
+- Short decisive sentences.
+- Sound like a $25k consultant.
 
 Return STRICT JSON:
 
@@ -171,7 +174,6 @@ Return ONLY JSON.
 
 async function runAuditJob(job: any) {
   const { caseId, jobId } = job.data;
-  console.log(`[Job ${jobId}] Starting audit for Case ${caseId}`);
 
   try {
     const caseData = await prisma.case.findUnique({ where: { id: caseId } });
@@ -182,129 +184,55 @@ async function runAuditJob(job: any) {
         where: { id: jobId },
         data: { stage, progress }
       });
-      console.log(`[Job ${jobId}] ${stage} (${progress}%)`);
     };
 
     const vitals = caseData.vitals as any;
     const base = `${caseData.whatTheySell} in ${caseData.location}`;
 
-    // ------------------------------------------------
-    // STAGE 1 — MULTI PASS RESEARCH
-    // ------------------------------------------------
     await updateStage("Competitor Discovery", 10);
 
-    const queries = [
-      `${base} pricing service call fee`,
-      `${base} membership maintenance plan`,
-      `${base} warranty guarantee`,
-      `${base} reviews rating competitors`
-    ];
+    const res = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `SEARCH QUERY: ${base} pricing membership warranty reviews\n\n${RESEARCH_PROMPT}`,
+        config: { tools: [{ googleSearch: {} }] }
+      }),
+      45000,
+      "Research"
+    );
 
-    const researchChunks: string[] = [];
-    const sourceUrls: string[] = [];
+    const researchText = res.text || "";
 
-    for (let i = 0; i < queries.length; i++) {
-      const res = await withTimeout(
-        ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: `SEARCH QUERY: ${queries[i]}\n\n${RESEARCH_PROMPT}`,
-          config: { tools: [{ googleSearch: {} }] }
-        }),
-        45000,
-        `Research Pass ${i + 1}`
-      );
-
-      const txt = res.text || "";
-      researchChunks.push(`\n\n=== PASS ${i + 1} ===\n${txt}`);
-
-      const grounding =
-        res.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-      const groundingUrls = grounding
-        .map((c: any) => c.web?.uri)
-        .filter((u: any) => u);
-
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      const textUrls = txt.match(urlRegex) || [];
-
-      sourceUrls.push(...groundingUrls, ...textUrls);
-    }
-
-    const researchText = researchChunks.join("\n");
-    const allSourceUrls = Array.from(new Set(sourceUrls));
-
-    // ------------------------------------------------
-    // STAGE 2 — EXTRACTION
-    // ------------------------------------------------
     await updateStage("Evidence Extraction", 40);
 
-    const extractorInput = `
-RAW RESEARCH:
-${researchText}
+    const extractorResult = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: EXTRACTOR_PROMPT + "\n\n" + researchText,
+        config: { responseMimeType: "application/json" }
+      }),
+      45000,
+      "Extractor"
+    );
 
-SOURCE URLS:
-${allSourceUrls.join("\n")}
-`;
+    const json = safeJsonParse(extractorResult.text || "");
+    const extractedData = json
+      ? ExtractedDataSchema.parse(json)
+      : { competitors: [], evidence: [] };
 
-    const extractorCall = async (prompt: string) =>
-      await withTimeout(
-        ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: prompt,
-          config: { responseMimeType: "application/json" }
-        }),
-        45000,
-        "Extractor"
-      );
-
-    let extractedData: ExtractedData | null = null;
-
-    const attempt1 = await extractorCall(EXTRACTOR_PROMPT + "\n\n" + extractorInput);
-    const json1 = safeJsonParse(attempt1.text || "");
-    if (json1) {
-      try {
-        extractedData = ExtractedDataSchema.parse(json1);
-      } catch {}
-    }
-
-    if (!extractedData) {
-      const repairPrompt =
-        `Fix output to EXACT schema:\n${EXTRACTOR_JSON_SHAPE}\n\nReturn ONLY JSON.\n\n${extractorInput}`;
-
-      const attempt2 = await extractorCall(repairPrompt);
-      const json2 = safeJsonParse(attempt2.text || "");
-      if (json2) {
-        try {
-          extractedData = ExtractedDataSchema.parse(json2);
-        } catch {}
-      }
-    }
-
-    if (!extractedData) {
-      extractedData = { competitors: [], evidence: [] };
-    }
-
-    // ------------------------------------------------
-    // STAGE 3 — BENCHMARK
-    // ------------------------------------------------
     await updateStage("Benchmarking", 70);
+
     const benchmark = computeBenchmark(vitals, extractedData);
+    const delta = benchmark.delta || {};
+    const strategicProfile = computeStrategicProfile(delta, vitals, benchmark);
 
-    // ------------------------------------------------
-    // STAGE 3.5 — DELTA ENGINE
-    // ------------------------------------------------
-    const delta = computeMarketDelta(vitals, extractedData, benchmark);
-
-    // ------------------------------------------------
-    // STAGE 4 — COMPOSER
-    // ------------------------------------------------
     await updateStage("Report Composition", 85);
 
     const composerInput = JSON.stringify({
       client: { ...caseData, vitals },
       market_data: extractedData,
       benchmark,
-      delta
+      strategic_profile: strategicProfile
     });
 
     const composerResult = await withTimeout(
@@ -320,9 +248,6 @@ ${allSourceUrls.join("\n")}
     const rawComposer = safeJsonParse(composerResult.text || "") || {};
     const reportContent = ReportSchema.parse(rawComposer);
 
-    // ------------------------------------------------
-    // SAVE REPORT
-    // ------------------------------------------------
     const finalReport = {
       meta: {
         generated_at: new Date().toISOString(),
@@ -331,6 +256,7 @@ ${allSourceUrls.join("\n")}
       ...reportContent,
       benchmark_data: benchmark,
       delta,
+      strategic_profile: strategicProfile,
       evidence_drawer: extractedData.evidence,
       competitors: extractedData.competitors
     };
@@ -348,10 +274,7 @@ ${allSourceUrls.join("\n")}
       data: { status: 'completed', progress: 100, finishedAt: new Date() }
     });
 
-    console.log(`[Job ${jobId}] Finished successfully.`);
-
   } catch (error: any) {
-    console.error(`[Job ${jobId}] Failed:`, error);
     await prisma.job.update({
       where: { id: jobId },
       data: {
@@ -366,10 +289,6 @@ ${allSourceUrls.join("\n")}
 async function start() {
   await boss.start();
   await boss.work('audit-job', runAuditJob);
-  console.log('Worker started. Waiting for jobs...');
 }
 
-start().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+start().catch(() => process.exit(1));
