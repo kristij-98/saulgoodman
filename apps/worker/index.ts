@@ -4,6 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { ExtractedDataSchema, ExtractedData } from '../../shared/schema/extractor.zod';
 import { ReportSchema } from '../../shared/schema/report.zod';
 import { computeBenchmark } from '../../lib/scoring';
+import { computeMarketDelta } from '../../lib/delta';
 import { nanoid } from 'nanoid';
 
 // ------------------------------------------------
@@ -42,11 +43,8 @@ function safeJsonParse(text: string): any | null {
 
 const RESEARCH_PROMPT = `
 You are a forensic-grade competitive intelligence analyst.
-
 Collect REAL competitor evidence for a paid audit.
-
-DO NOT summarize.
-DO NOT give advice.
+DO NOT summarize. DO NOT give advice.
 ONLY extract factual evidence with URLs and snippets.
 
 Find 6–10 DIRECT competitors.
@@ -111,7 +109,6 @@ const EXTRACTOR_JSON_SHAPE = `
 
 const EXTRACTOR_PROMPT = `
 Convert the research into STRICT JSON.
-
 Match EXACTLY this structure:
 
 ${EXTRACTOR_JSON_SHAPE}
@@ -126,42 +123,23 @@ Rules:
 const COMPOSER_PROMPT = `
 You are "Profit Leak Attorney".
 
-You are not a marketer.
 You are a strategic cross-examiner.
 
-You have:
-- Client vitals
-- Competitor evidence (with proof)
-- Benchmark scoring
+You receive:
+- client vitals
+- competitor evidence
+- benchmark scoring
+- structured market delta
 
-Your job:
-Produce a sharp, specific audit that compares the client directly against the market.
+Produce a sharp, specific audit.
 
-RULES:
-- Every major claim must reference competitor positioning.
-- If pricing is lower than competitors, say it directly.
-- If membership is missing while competitors have it, call it out.
-- If warranty is weak compared to market, say so.
-- Do NOT give generic advice.
-- Do NOT repeat the input.
-- Be specific and surgical.
-
-You must:
-
-1) Label their MARKET POSITION:
-   - Discount
-   - Mid-tier
-   - Premium
-   - Undefined
-
-2) Identify top 3 revenue leaks ranked by:
-   - Easiest money first
-   - Highest impact second
-   - Strategic moat third
-
-3) Use short, decisive sentences.
-4) Avoid fluff or motivational tone.
-5) Sound like a $25k consultant.
+Rules:
+- Reference market contrast.
+- Call out pricing gaps directly.
+- Call out missing memberships.
+- Call out warranty weakness.
+- Use structured reasoning.
+- No fluff.
 
 Return STRICT JSON:
 
@@ -290,11 +268,8 @@ ${allSourceUrls.join("\n")}
     }
 
     if (!extractedData) {
-      console.error("Extractor failed first pass. Retrying...");
       const repairPrompt =
-        `Fix output to EXACT schema:\n${EXTRACTOR_JSON_SHAPE}\n\n` +
-        `Return ONLY JSON.\n\n` +
-        extractorInput;
+        `Fix output to EXACT schema:\n${EXTRACTOR_JSON_SHAPE}\n\nReturn ONLY JSON.\n\n${extractorInput}`;
 
       const attempt2 = await extractorCall(repairPrompt);
       const json2 = safeJsonParse(attempt2.text || "");
@@ -306,7 +281,6 @@ ${allSourceUrls.join("\n")}
     }
 
     if (!extractedData) {
-      console.error("Extractor failed twice. Using fallback.");
       extractedData = { competitors: [], evidence: [] };
     }
 
@@ -317,6 +291,11 @@ ${allSourceUrls.join("\n")}
     const benchmark = computeBenchmark(vitals, extractedData);
 
     // ------------------------------------------------
+    // STAGE 3.5 — DELTA ENGINE
+    // ------------------------------------------------
+    const delta = computeMarketDelta(vitals, extractedData, benchmark);
+
+    // ------------------------------------------------
     // STAGE 4 — COMPOSER
     // ------------------------------------------------
     await updateStage("Report Composition", 85);
@@ -324,7 +303,8 @@ ${allSourceUrls.join("\n")}
     const composerInput = JSON.stringify({
       client: { ...caseData, vitals },
       market_data: extractedData,
-      benchmark
+      benchmark,
+      delta
     });
 
     const composerResult = await withTimeout(
@@ -350,6 +330,7 @@ ${allSourceUrls.join("\n")}
       },
       ...reportContent,
       benchmark_data: benchmark,
+      delta,
       evidence_drawer: extractedData.evidence,
       competitors: extractedData.competitors
     };
