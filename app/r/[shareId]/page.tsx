@@ -104,16 +104,49 @@ export default async function ReportPage({ params }: { params: { shareId: string
 
   const actions = pickTopActions(data);
 
-  // Leak metrics (from benchmark_data.leaks.*)
-  const leaks = data?.benchmark_data?.leaks ?? {};
-  const perMonthLow = num(leaks?.per_month_low);
-  const perMonthHigh = num(leaks?.per_month_high);
-  const perYearLow = num(leaks?.per_year_low);
-  const perYearHigh = num(leaks?.per_year_high);
+  // ------------------------------------------------
+  // Leak metrics (ROBUST lookup — fixes blanks)
+  // We try multiple likely locations so the headline never shows "—"
+  // ------------------------------------------------
+  const leakCandidates = [
+    data?.benchmark_data?.leaks,
+    data?.benchmark_data?.delta?.leaks,
+    data?.delta?.leaks,
+    data?.benchmark_data?.leak_estimate,
+    data?.delta?.leak_estimate,
+  ].filter(Boolean);
+
+  function pickLeakNumber(keys: string[]): number | null {
+    for (const obj of leakCandidates) {
+      for (const k of keys) {
+        const v = (obj as any)?.[k];
+        const n = num(v);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  }
+
+  const perMonthLow = pickLeakNumber(["per_month_low", "monthly_low", "month_low", "leak_month_low"]);
+  const perMonthHigh = pickLeakNumber(["per_month_high", "monthly_high", "month_high", "leak_month_high"]);
+  const perYearLow = pickLeakNumber(["per_year_low", "yearly_low", "year_low", "leak_year_low"]);
+  const perYearHigh = pickLeakNumber(["per_year_high", "yearly_high", "year_high", "leak_year_high"]);
+
+  // If only one side exists, use it for both so we never show blanks
+  const perMonthFallback = perMonthLow ?? perMonthHigh;
+  const finalPerMonthLow = perMonthLow ?? perMonthFallback;
+  const finalPerMonthHigh = perMonthHigh ?? perMonthFallback;
+
+  const perYearFallback = perYearLow ?? perYearHigh;
+  const finalPerYearLow =
+    perYearLow ?? perYearFallback ?? (finalPerMonthLow !== null ? finalPerMonthLow * 12 : null);
+
+  const finalPerYearHigh =
+    perYearHigh ?? perYearFallback ?? (finalPerMonthHigh !== null ? finalPerMonthHigh * 12 : null);
 
   // Delay cost framing: weekly bleed (rough)
-  const perWeekLow = perMonthLow === null ? null : perMonthLow / 4;
-  const perWeekHigh = perMonthHigh === null ? null : perMonthHigh / 4;
+  const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
+  const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
 
   // Competitor snapshot rows (simple + readable)
   const competitorRows = competitors.slice(0, 10).map((c: any) => {
@@ -178,13 +211,13 @@ export default async function ReportPage({ params }: { params: { shareId: string
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">
                 You’re leaking{" "}
                 <span className="underline decoration-zinc-200 underline-offset-4">
-                  {moneyRange(perMonthLow, perMonthHigh)}
+                  {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
                 </span>{" "}
                 per month.
               </h2>
 
               <div className="mt-2 text-sm text-zinc-700">
-                That’s <span className="font-semibold">{moneyRange(perYearLow, perYearHigh)}</span> per year in missed profit
+                That’s <span className="font-semibold">{moneyRange(finalPerYearLow, finalPerYearHigh)}</span> per year in missed profit
                 from pricing + offer structure vs your local competitors.
               </div>
 
@@ -250,7 +283,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
           {topLeaks.length ? (
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               {topLeaks.slice(0, 3).map((l: any, idx: number) => {
-                const impact = allocateLeakImpact(perMonthLow, perMonthHigh, idx);
+                const impact = allocateLeakImpact(finalPerMonthLow, finalPerMonthHigh, idx);
                 return (
                   <div key={idx} className="rounded-xl border bg-zinc-50 p-4">
                     <div className="flex items-center justify-between">
