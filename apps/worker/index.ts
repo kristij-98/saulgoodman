@@ -73,14 +73,14 @@ async function runAuditJob(job: any) {
     const vitals = caseData.vitals as any;
     const query = `${caseData.what_they_sell} companies in ${caseData.location} pricing membership reviews`;
     
-    // Using standard model for stability
+    // Using standard model for stability with old SDK
     const researchModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
     const researchResult = await researchModel.generateContent(`SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`);
     const researchResponse = researchResult.response;
     const researchText = researchResponse.text();
     
-    // Fallback: extracting any URL-like strings from text since new SDK grounding metadata isn't available
+    // Fallback: extracting any URL-like strings from text since old SDK doesn't support structured grounding metadata easily
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const sourceUrls = researchText.match(urlRegex) || [];
 
