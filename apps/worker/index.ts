@@ -37,8 +37,18 @@ function safeJsonParse(text: string): any | null {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+function clampInt(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function safeString(x: any) {
+  if (typeof x === "string") return x;
+  if (x == null) return "";
+  return String(x);
+}
+
 // ------------------------------------------------
-// PROMPTS
+// PROMPTS (MAX FORENSIC — DO NOT DUMB DOWN)
 // ------------------------------------------------
 
 const RESEARCH_PROMPT = `
@@ -111,6 +121,8 @@ const EXTRACTOR_JSON_SHAPE = `
 `;
 
 const EXTRACTOR_PROMPT = `
+You are a strict data extractor.
+
 Convert the research into STRICT JSON.
 
 Match EXACTLY this structure:
@@ -118,10 +130,13 @@ Match EXACTLY this structure:
 ${EXTRACTOR_JSON_SHAPE}
 
 Rules:
-- Return ONLY JSON.
-- Never omit keys.
-- Unknown values => null or [].
-- evidence.type must be pricing|service|reputation|guarantee|other.
+- Return ONLY JSON. No markdown. No commentary.
+- Never omit keys. If unknown: null or [].
+- evidence.type must be one of: pricing, service, reputation, guarantee, other.
+- competitors[].evidence_ids MUST exist (can be []).
+- competitors[].pricing_signals MUST exist (can be []).
+- competitors[].premium_signals MUST exist (can be []).
+- competitors[].services MUST exist (can be []).
 `;
 
 const COMPOSER_PROMPT = `
@@ -132,7 +147,7 @@ You are a strategic cross-examiner.
 
 You have:
 - Client vitals
-- Competitor evidence
+- Competitor evidence (with proof)
 - Benchmark scoring
 - Strategic profile
 
@@ -143,6 +158,8 @@ RULES:
 - No generic advice.
 - Short decisive sentences.
 - Sound like a $25k consultant.
+- If evidence is weak, SAY IT. Do not invent.
+- Claims about market must tie back to competitor evidence patterns.
 
 Return STRICT JSON:
 
@@ -175,85 +192,299 @@ Return ONLY JSON.
 async function runAuditJob(job: any) {
   const { caseId, jobId } = job.data;
 
+  // Small helper: always persist “premium” progress info
+  const setProgress = async (stage: string, progress: number, patchPayload?: any) => {
+    // Merge payloadJson safely (without relying on old local job object)
+    let currentPayload: any = {};
+    try {
+      const j = await prisma.job.findUnique({ where: { id: jobId } });
+      currentPayload = (j?.payloadJson && typeof j.payloadJson === "object") ? j.payloadJson : {};
+    } catch {
+      currentPayload = {};
+    }
+
+    const nextPayload = patchPayload ? { ...currentPayload, ...patchPayload } : currentPayload;
+
+    await prisma.job.update({
+      where: { id: jobId },
+      data: {
+        stage,
+        progress: clampInt(progress, 0, 100),
+        payloadJson: nextPayload
+      }
+    });
+  };
+
   try {
     const caseData = await prisma.case.findUnique({ where: { id: caseId } });
     if (!caseData) throw new Error("Case not found");
 
-    const updateStage = async (stage: string, progress: number) => {
-      await prisma.job.update({
-        where: { id: jobId },
-        data: { stage, progress }
-      });
-    };
-
     const vitals = caseData.vitals as any;
     const base = `${caseData.whatTheySell} in ${caseData.location}`;
 
-    await updateStage("Competitor Discovery", 10);
+    // ------------------------------------------------
+    // STAGE 1 — MAX FORENSIC MULTI-PASS RESEARCH (ANTI-FRAGILE)
+    // ------------------------------------------------
+    await setProgress("Initializing Market Intelligence Engine…", 5, {
+      research_mode: "grounded",
+      passes_completed: 0,
+      total_passes: 0,
+      grounded_sources_count: 0,
+      current_query: ""
+    });
 
-    const res = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `SEARCH QUERY: ${base} pricing membership warranty reviews\n\n${RESEARCH_PROMPT}`,
-        config: { tools: [{ googleSearch: {} }] }
-      }),
-      45000,
-      "Research"
-    );
+    const queries = [
+      `${base} pricing service call fee diagnostic trip fee`,
+      `${base} membership maintenance plan tune-up club`,
+      `${base} warranty guarantee workmanship parts`,
+      `${base} financing options monthly payment`,
+      `${base} reviews rating competitor`,
+      `${base} premium service same day priority VIP`
+    ];
 
-    const researchText = res.text || "";
+    const totalPasses = queries.length;
+    const researchChunks: string[] = [];
+    const sourceUrls: string[] = [];
 
-    await updateStage("Evidence Extraction", 40);
+    let groundedSourcesTotal = 0;
+    let researchMode: "grounded" | "degraded" = "grounded";
+    const researchErrors: string[] = [];
 
-    const extractorResult = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: EXTRACTOR_PROMPT + "\n\n" + researchText,
-        config: { responseMimeType: "application/json" }
-      }),
-      45000,
-      "Extractor"
-    );
+    await setProgress("Scanning Market Landscape…", 10, {
+      total_passes: totalPasses
+    });
 
-    const json = safeJsonParse(extractorResult.text || "");
-    const extractedData = json
-      ? ExtractedDataSchema.parse(json)
-      : { competitors: [], evidence: [] };
+    for (let i = 0; i < queries.length; i++) {
+      const q = queries[i];
 
-    await updateStage("Benchmarking", 70);
+      // premium progress BEFORE pass
+      await setProgress(
+        `Scanning Market Landscape… (Pass ${i + 1}/${totalPasses})`,
+        10 + Math.floor(((i) / totalPasses) * 20),
+        {
+          passes_completed: i,
+          current_query: q,
+          grounded_sources_count: groundedSourcesTotal,
+          research_mode: researchMode
+        }
+      );
+
+      try {
+        const res = await withTimeout(
+          ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `SEARCH QUERY: ${q}\n\n${RESEARCH_PROMPT}`,
+            config: { tools: [{ googleSearch: {} }] }
+          }),
+          60000,
+          `Research Pass ${i + 1}`
+        );
+
+        const txt = res.text || "";
+        researchChunks.push(`\n\n=== PASS ${i + 1} ===\nQUERY: ${q}\n${txt}`);
+
+        const grounding =
+          res.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+        const groundingUrls = grounding
+          .map((c: any) => c.web?.uri)
+          .filter((u: any) => u);
+
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const textUrls = txt.match(urlRegex) || [];
+
+        groundedSourcesTotal += groundingUrls.length;
+
+        sourceUrls.push(...groundingUrls, ...textUrls);
+
+      } catch (e: any) {
+        researchMode = "degraded";
+        researchErrors.push(`[Pass ${i + 1}] ${safeString(e?.message || e)}`);
+        researchChunks.push(`\n\n=== PASS ${i + 1} FAILED ===\nQUERY: ${q}\nERROR: ${safeString(e?.message || e)}`);
+      }
+
+      // update after pass
+      await setProgress(
+        `Scanning Market Landscape… (Pass ${i + 1}/${totalPasses})`,
+        10 + Math.floor(((i + 1) / totalPasses) * 20),
+        {
+          passes_completed: i + 1,
+          current_query: q,
+          grounded_sources_count: groundedSourcesTotal,
+          research_mode: groundedSourcesTotal > 0 ? "grounded" : "degraded",
+          research_errors: researchErrors
+        }
+      );
+    }
+
+    if (groundedSourcesTotal === 0) {
+      researchMode = "degraded";
+    }
+
+    const researchText = researchChunks.join("\n");
+    const allSourceUrls = Array.from(new Set(sourceUrls));
+
+    // ------------------------------------------------
+    // STAGE 2 — EXTRACTION (HARDENED)
+    // ------------------------------------------------
+    await setProgress("Extracting Price & Offer Signals…", 40, {
+      extractor_attempt: 1,
+      sources_found: allSourceUrls.length
+    });
+
+    const extractorInput = `
+RAW RESEARCH:
+${researchText}
+
+SOURCE URLS (deduped):
+${allSourceUrls.join("\n")}
+`;
+
+    const extractorCall = async (prompt: string) =>
+      await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt,
+          config: { responseMimeType: "application/json" }
+        }),
+        60000,
+        "Extractor"
+      );
+
+    let extractedData: ExtractedData | null = null;
+
+    // Attempt 1
+    try {
+      const r1 = await extractorCall(EXTRACTOR_PROMPT + "\n\n" + extractorInput);
+      const j1 = safeJsonParse(r1.text || "");
+      if (j1) extractedData = ExtractedDataSchema.parse(j1);
+    } catch {
+      extractedData = null;
+    }
+
+    // Attempt 2 (repair)
+    if (!extractedData) {
+      await setProgress("Extracting Price & Offer Signals…", 45, {
+        extractor_attempt: 2
+      });
+
+      const repairPrompt = `
+Your previous output was invalid.
+
+Return ONLY valid JSON matching EXACTLY this shape:
+
+${EXTRACTOR_JSON_SHAPE}
+
+Rules:
+- NEVER omit keys.
+- Unknown => null or [].
+- evidence.type must be one of pricing|service|reputation|guarantee|other.
+
+Re-extract from this input:
+
+${extractorInput}
+`.trim();
+
+      try {
+        const r2 = await extractorCall(repairPrompt);
+        const j2 = safeJsonParse(r2.text || "");
+        if (j2) extractedData = ExtractedDataSchema.parse(j2);
+      } catch {
+        extractedData = null;
+      }
+    }
+
+    // Final fallback (job continues)
+    if (!extractedData) {
+      extractedData = { competitors: [], evidence: [] };
+      await setProgress("Extracting Price & Offer Signals…", 48, {
+        extractor_fallback_used: true
+      });
+    }
+
+    // ------------------------------------------------
+    // STAGE 3 — BENCHMARKING (DETERMINISTIC)
+    // ------------------------------------------------
+    await setProgress("Running Competitive Cross-Examination…", 70, {
+      competitors_count: extractedData.competitors.length,
+      evidence_count: extractedData.evidence.length
+    });
 
     const benchmark = computeBenchmark(vitals, extractedData);
-    const delta = benchmark.delta || {};
-    const strategicProfile = computeStrategicProfile(delta, vitals, benchmark);
 
-    await updateStage("Report Composition", 85);
+    // IMPORTANT: you do NOT have benchmark.delta in your ScoreResult.
+    // We compute a safe delta locally for strategy (so no compile failures).
+    const delta = {
+      competitors_count: extractedData.competitors.length,
+      pricing_evidence_count: extractedData.competitors.filter(c => (c.pricing_signals || []).length > 0).length,
+      membership_competitor_count: extractedData.competitors.filter(c => !!c.membership_offer).length,
+      trip_fee_competitor_count: extractedData.competitors.filter(c => !!c.trip_fee).length,
+      warranty_competitor_count: extractedData.competitors.filter(c => !!c.warranty_offer).length,
+      research_mode: researchMode,
+      grounded_sources_count: groundedSourcesTotal
+    };
+
+    const strategicProfile = computeStrategicProfile(delta as any, vitals, benchmark as any);
+
+    // ------------------------------------------------
+    // STAGE 4 — COMPOSER (HARDENED)
+    // ------------------------------------------------
+    await setProgress("Constructing Strategic Verdict…", 85, {
+      composer_model: "gemini-3-pro-preview",
+      confidence: benchmark.confidence,
+      research_mode: researchMode,
+      grounded_sources_count: groundedSourcesTotal
+    });
 
     const composerInput = JSON.stringify({
       client: { ...caseData, vitals },
       market_data: extractedData,
       benchmark,
-      strategic_profile: strategicProfile
+      delta,
+      strategic_profile: strategicProfile,
+      diagnostics: {
+        research_mode: researchMode,
+        grounded_sources_count: groundedSourcesTotal,
+        source_urls_count: allSourceUrls.length
+      }
     });
 
-    const composerResult = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: COMPOSER_PROMPT + "\n\n" + composerInput,
-        config: { responseMimeType: "application/json" }
-      }),
-      60000,
-      "Composer"
-    );
+    const composerCall = async () =>
+      await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3-pro-preview',
+          contents: COMPOSER_PROMPT + "\n\n" + composerInput,
+          config: { responseMimeType: "application/json" }
+        }),
+        90000,
+        "Composer"
+      );
 
-    const rawComposer = safeJsonParse(composerResult.text || "") || {};
-    const reportContent = ReportSchema.parse(rawComposer);
+    let reportContent: any = {};
+    try {
+      const cr = await composerCall();
+      reportContent = safeJsonParse(cr.text || "") || {};
+    } catch {
+      reportContent = {};
+    }
 
+    const validatedReport = ReportSchema.parse(reportContent);
+
+    // ------------------------------------------------
+    // SAVE REPORT
+    // ------------------------------------------------
     const finalReport = {
       meta: {
         generated_at: new Date().toISOString(),
-        confidence: benchmark.confidence
+        confidence: benchmark.confidence,
+        research_mode: researchMode,
+        grounded_sources_count: groundedSourcesTotal,
+        passes_total: totalPasses,
+        sources_found: allSourceUrls.length,
+        competitor_count: extractedData.competitors.length,
+        evidence_count: extractedData.evidence.length
       },
-      ...reportContent,
+      ...validatedReport,
       benchmark_data: benchmark,
       delta,
       strategic_profile: strategicProfile,
@@ -279,7 +510,7 @@ async function runAuditJob(job: any) {
       where: { id: jobId },
       data: {
         status: 'failed',
-        error: error?.message || "Unknown error",
+        error: safeString(error?.message || error),
         finishedAt: new Date()
       }
     });
@@ -289,6 +520,10 @@ async function runAuditJob(job: any) {
 async function start() {
   await boss.start();
   await boss.work('audit-job', runAuditJob);
+  console.log("Worker started. Waiting for jobs...");
 }
 
-start().catch(() => process.exit(1));
+start().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
