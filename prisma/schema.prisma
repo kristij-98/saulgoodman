@@ -6,3 +6,57 @@ datasource db {
 generator client {
   provider = "prisma-client-js"
 }
+
+model Case {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  businessName  String?
+  industry      String
+  mainService   String
+
+  jobsPerMonth  Int?
+  avgTicket     Int?
+
+  hasPackages   Boolean  @default(false)
+  hasAddOnMenu  Boolean  @default(false)
+  hasPremium    Boolean  @default(false)
+
+  competitorNotes String? @db.Text
+  rawInput        Json?
+
+  jobs          Job[]
+  reports       Report[]
+}
+
+model Job {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  caseId    String
+  status    String   @default("queued") // queued | running | done | error
+  progress  Int      @default(0)
+  error     String?  @db.Text
+  result    Json?
+
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  caseId    String
+  shareId   String   @unique
+
+  data      Json
+  html      String?  @db.Text
+
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
