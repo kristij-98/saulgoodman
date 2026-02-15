@@ -1,6 +1,6 @@
 import PgBoss from 'pg-boss';
 import { PrismaClient } from '@prisma/client';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generativeai";
 import { IntakeSchema, ExtractedDataSchema, ExtractedData } from '../../shared/schema/extractor.zod';
 import { computeBenchmark } from '../../lib/scoring';
 import { nanoid } from 'nanoid';
@@ -16,7 +16,7 @@ if (!DATABASE_URL || !GEMINI_API_KEY) {
 
 const prisma = new PrismaClient();
 const boss = new PgBoss(DATABASE_URL);
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // --- PROMPTS ---
 const RESEARCH_PROMPT = `
@@ -73,18 +73,16 @@ async function runAuditJob(job: any) {
     const vitals = caseData.vitals as any;
     const query = `${caseData.what_they_sell} companies in ${caseData.location} pricing membership reviews`;
     
-    const researchResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`,
-      config: {
-        tools: [{ googleSearch: {} }],
-      }
-    });
+    // Using standard model for stability
+    const researchModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
-    // Extract grounding chunks manually if needed, or rely on text
-    const researchText = researchResponse.text;
-    const groundingChunks = researchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const sourceUrls = groundingChunks.map((c: any) => c.web?.uri).filter(Boolean);
+    const researchResult = await researchModel.generateContent(`SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`);
+    const researchResponse = researchResult.response;
+    const researchText = researchResponse.text();
+    
+    // Fallback: extracting any URL-like strings from text since new SDK grounding metadata isn't available
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const sourceUrls = researchText.match(urlRegex) || [];
 
     await updateStage("Evidence Extraction", 40);
 
@@ -98,23 +96,22 @@ async function runAuditJob(job: any) {
       ${sourceUrls.join(', ')}
     `;
 
-    const extractorResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: extractorInput,
-      config: {
-        systemInstruction: EXTRACTOR_PROMPT,
-        responseMimeType: "application/json",
-      }
+    const extractorModel = genAI.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: { responseMimeType: "application/json" }
     });
 
-    const extractedJsonRaw = extractorResponse.text;
+    const extractorResult = await extractorModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: EXTRACTOR_PROMPT + "\n\n" + extractorInput }] }]
+    });
+
+    const extractedJsonRaw = extractorResult.response.text();
     let extractedData: ExtractedData;
     
     try {
       extractedData = ExtractedDataSchema.parse(JSON.parse(extractedJsonRaw));
     } catch (e) {
       console.error("JSON Parse fail, retrying extraction...");
-      // Simple retry logic could go here
       throw new Error("Failed to parse competitor data");
     }
 
@@ -135,16 +132,16 @@ async function runAuditJob(job: any) {
       benchmark: benchmark
     });
 
-    const composerResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: composerInput,
-      config: {
-        systemInstruction: COMPOSER_PROMPT,
-        responseMimeType: "application/json"
-      }
+    const composerModel = genAI.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: { responseMimeType: "application/json" }
     });
 
-    const reportContent = JSON.parse(composerResponse.text);
+    const composerResult = await composerModel.generateContent({
+         contents: [{ role: 'user', parts: [{ text: COMPOSER_PROMPT + "\n\n" + composerInput }] }]
+    });
+
+    const reportContent = JSON.parse(composerResult.response.text());
 
     // Final Report Payload Construction
     const finalReport = {
