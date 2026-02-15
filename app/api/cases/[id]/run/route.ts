@@ -1,3 +1,4 @@
+
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getQueue } from '@/lib/queue';
@@ -11,7 +12,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   // Create Job Record
   const job = await prisma.job.create({
     data: {
-      case_id: caseId,
+      caseId: caseId,
       status: 'pending',
       progress: 0
     }

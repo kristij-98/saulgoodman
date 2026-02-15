@@ -1,3 +1,4 @@
+
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
@@ -19,7 +20,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   let report_share_id = undefined;
   if (job.status === 'completed' && job.case.reports.length > 0) {
-     report_share_id = job.case.reports[0].share_id;
+     report_share_id = job.case.reports[0].shareId;
   }
 
   return NextResponse.json({

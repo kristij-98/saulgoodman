@@ -72,7 +72,7 @@ async function runAuditJob(job: any) {
     
     // We construct a query based on input
     const vitals = caseData.vitals as any;
-    const query = `${caseData.what_they_sell} companies in ${caseData.location} pricing membership reviews`;
+    const query = `${caseData.whatTheySell} companies in ${caseData.location} pricing membership reviews`;
     
     // Use Gemini 3 Flash Preview with Google Search Grounding
     const researchResult = await ai.models.generateContent({
@@ -175,15 +175,15 @@ async function runAuditJob(job: any) {
     // Save Report
     await prisma.report.create({
       data: {
-        case_id: caseId,
-        share_id: nanoid(10),
-        payload_json: finalReport
+        caseId: caseId,
+        shareId: nanoid(10),
+        payloadJson: finalReport
       }
     });
 
     await prisma.job.update({
       where: { id: jobId },
-      data: { status: 'completed', progress: 100, finished_at: new Date() }
+      data: { status: 'completed', progress: 100, finishedAt: new Date() }
     });
 
     console.log(`[Job ${jobId}] Finished successfully.`);
@@ -192,7 +192,7 @@ async function runAuditJob(job: any) {
     console.error(`[Job ${jobId}] Failed:`, error);
     await prisma.job.update({
       where: { id: jobId },
-      data: { status: 'failed', error: error.message, finished_at: new Date() }
+      data: { status: 'failed', error: error.message, finishedAt: new Date() }
     });
   }
 }

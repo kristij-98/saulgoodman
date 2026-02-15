@@ -1,3 +1,4 @@
+
 import { prisma } from '@/lib/prisma';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -8,13 +9,13 @@ export const dynamic = 'force-dynamic';
 
 export default async function ReportPage({ params }: { params: { shareId: string } }) {
   const report = await prisma.report.findUnique({
-    where: { share_id: params.shareId },
+    where: { shareId: params.shareId },
     include: { case: true }
   });
 
   if (!report) return notFound();
 
-  const data = report.payload_json as any;
+  const data = report.payloadJson as any;
   const confidence = data.meta.confidence as "HIGH" | "MED" | "LOW";
 
   const confidenceColor = {
@@ -29,7 +30,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
            <h1 className="text-3xl font-bold tracking-tight">Audit Report</h1>
-           <p className="text-muted-foreground">For {report.case.website_url}</p>
+           <p className="text-muted-foreground">For {report.case.websiteUrl}</p>
         </div>
         <Link href="/new" className="inline-flex h-10 items-center justify-center rounded-md bg-slate-900 px-8 text-sm font-medium text-white shadow hover:bg-slate-800 transition-colors">
           Run Another Audit
