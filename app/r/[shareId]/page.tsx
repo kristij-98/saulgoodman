@@ -26,24 +26,24 @@ function money(n: number | null): string {
 }
 function moneyRange(lo: number | null, hi: number | null): string {
   if (lo === null && hi === null) return "—";
-  if (lo !== null && hi === null) return `${money(lo)}`;
-  if (lo === null && hi !== null) return `${money(hi)}`;
+  if (lo !== null && hi === null) return money(lo);
+  if (lo === null && hi !== null) return money(hi);
   return `${money(lo)}–${money(hi)}`;
 }
 
 function badge(conf: string) {
   const c = (conf || "").toUpperCase();
-  if (c === "HIGH") return { text: "HIGH", cls: "bg-emerald-100 text-emerald-900 border-emerald-200" };
-  if (c === "MED") return { text: "MEDIUM", cls: "bg-amber-100 text-amber-900 border-amber-200" };
-  return { text: "LOW", cls: "bg-rose-100 text-rose-900 border-rose-200" };
+  if (c === "HIGH") return { text: "HIGH", cls: "bg-emerald-50 text-emerald-900 border-emerald-200" };
+  if (c === "MED") return { text: "MEDIUM", cls: "bg-amber-50 text-amber-900 border-amber-200" };
+  return { text: "LOW", cls: "bg-rose-50 text-rose-900 border-rose-200" };
 }
 
 function evidenceTypeLabel(t: string) {
   const x = (t || "").toLowerCase();
   if (x === "pricing") return "Pricing";
   if (x === "service") return "Service";
-  if (x === "reputation") return "Reputation";
-  if (x === "guarantee") return "Guarantee";
+  if (x === "reputation") return "Reviews";
+  if (x === "guarantee") return "Warranty";
   return "Other";
 }
 
@@ -54,22 +54,27 @@ function pickTopActions(report: ReportAny): string[] {
   const offers = safeArray(report?.offer_rebuild)
     .map((o: any) => safeString(o?.title).trim())
     .filter(Boolean);
-  if (offers.length) return offers.slice(0, 5).map((t) => `Launch: ${t}`);
+  if (offers.length) return offers.slice(0, 5).map((t) => `Add: ${t}`);
 
   return [
     "Set a standard dispatch / trip fee (and waive it for members).",
-    "Add a simple membership plan to lock recurring revenue.",
-    "Publish a clear pricing corridor so buyers trust you faster.",
+    "Add a simple membership plan so you get recurring money each month.",
+    "Show a clear price range on your site so buyers trust you faster.",
   ];
 }
 
-// Honest allocation for prioritization only (not fake precision)
+// Planning estimate ONLY (not pretending precision).
+// Helps the owner decide what to fix first.
 function allocateLeakImpact(perMonthLow: number | null, perMonthHigh: number | null, idx: number) {
   const weights = [0.45, 0.35, 0.20];
   const w = weights[idx] ?? 0.2;
   const lo = perMonthLow === null ? null : perMonthLow * w;
   const hi = perMonthHigh === null ? null : perMonthHigh * w;
   return { lo, hi, w };
+}
+
+function shortHost(url: string) {
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
 export default async function ReportPage({ params }: { params: { shareId: string } }) {
@@ -89,18 +94,17 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const confBadge = badge(confidence);
 
   const quickVerdict = safeString(data?.quick_verdict, "");
-  const marketPosition = safeString(data?.market_position, "");
+  const marketPosition = safeString(data?.market_position, ""); // optional
 
   const topLeaks = safeArray(data?.top_leaks_ranked);
   const offers = safeArray(data?.offer_rebuild);
-
   const competitors = safeArray(data?.competitors);
   const evidence = safeArray(data?.evidence_drawer);
 
   const actions = pickTopActions(data);
   const do72 = actions.slice(0, 3);
 
-  // Leak metrics: try multiple places so UI doesn't break when scoring evolves
+  // Pull leak numbers from multiple places (so UI doesn't break as scoring evolves)
   const leakCandidates = [
     data?.benchmark_data?.leaks,
     data?.benchmark_data?.delta?.leaks,
@@ -137,7 +141,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
   const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
 
-  // Competitor snapshot rows (simple + readable)
   const competitorRows = competitors.slice(0, 10).map((c: any) => {
     const name = safeString(c?.name, "Unknown");
     const url = safeString(c?.url, "");
@@ -147,23 +150,29 @@ export default async function ReportPage({ params }: { params: { shareId: string
     return { name, url, tripFee, membership, warranty };
   });
 
-  const proofLine = `Based on ${competitors.length || "—"} competitors and ${evidence.length || "—"} proof snippets.`;
+  const proofLine = `Based on ${competitors.length || "—"} local competitors and ${evidence.length || "—"} proof snippets.`;
 
-  const diagnosisLine =
+  // Plain language “what this means”
+  const meaningLine =
     marketPosition
-      ? `Positioning: ${marketPosition}. This usually forces you to win on price and caps your ticket.`
-      : `This market has levers (fees, memberships, warranties) that increase profit per customer.`;
+      ? `Right now you look like a “${marketPosition}” option. That usually means you get price-shopped and your jobs stay small.`
+      : `This market rewards businesses that charge properly and sell a stronger offer (fees, plans, and warranty).`;
+
+  // Optional “tone” line — still simple
+  const verdictLine =
+    quickVerdict ||
+    "You’re leaving money on the table because your offer is weaker than what most competitors show publicly.";
 
   return (
     <div className="min-h-screen bg-zinc-50">
-      {/* HEADER */}
+      {/* TOP BAR */}
       <div className="border-b bg-white">
         <div className="mx-auto max-w-5xl px-6 py-6 flex items-start justify-between gap-6">
           <div>
-            <div className="text-xs text-zinc-500">Profit Leak Attorney (Beta)</div>
+            <div className="text-xs text-zinc-500">Profit Leak Attorney</div>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">Audit Report</h1>
             <div className="mt-1 text-sm text-zinc-600">
-              For <span className="font-medium text-zinc-800">{reportRow.case.websiteUrl}</span>
+              For <span className="font-medium text-zinc-800">{shortHost(reportRow.case.websiteUrl)}</span>
               <span className="mx-2 text-zinc-300">•</span>
               {reportRow.case.location}
             </div>
@@ -184,66 +193,80 @@ export default async function ReportPage({ params }: { params: { shareId: string
       </div>
 
       <div className="mx-auto max-w-5xl px-6 py-10 space-y-10">
-        {/* HERO — simple, premium, readable */}
+        {/* HERO — Official audit feel, simple words */}
         <div className="rounded-2xl border bg-white p-7 md:p-8">
-          <div className="grid gap-6 md:grid-cols-12 md:items-start">
-            {/* Left: headline + meaning */}
-            <div className="md:col-span-8">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Executive summary
+                Summary
               </div>
 
-              <h2 className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight text-zinc-900">
-                You’re leaking{" "}
-                <span className="text-rose-600">{moneyRange(finalPerMonthLow, finalPerMonthHigh)}</span>{" "}
-                <span className="text-zinc-600 text-base md:text-lg font-semibold">per month</span>.
-              </h2>
+              <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+                <div className="text-3xl md:text-4xl font-semibold tracking-tight text-zinc-900">
+                  Money you’re losing:
+                </div>
+                <div className="text-3xl md:text-4xl font-semibold tracking-tight text-rose-600">
+                  {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
+                </div>
+                <div className="text-base md:text-lg font-semibold text-zinc-600">
+                  / month
+                </div>
+              </div>
 
               <div className="mt-2 text-sm md:text-base text-zinc-700">
-                That’s <span className="font-semibold">{moneyRange(finalPerYearLow, finalPerYearHigh)}</span>{" "}
-                per year in missed profit from pricing + offer structure vs local competitors.
+                That’s about{" "}
+                <span className="font-semibold">{moneyRange(finalPerYearLow, finalPerYearHigh)}</span>{" "}
+                per year in missed profit compared to what competitors are already charging and offering.
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border bg-zinc-50 p-4">
                   <div className="text-xs font-semibold text-zinc-500">What this means</div>
                   <div className="mt-2 text-sm leading-relaxed text-zinc-800">
-                    {diagnosisLine}
+                    {meaningLine}
                   </div>
                 </div>
 
                 <div className="rounded-xl border bg-zinc-50 p-4">
-                  <div className="text-xs font-semibold text-zinc-500">Cost of delay</div>
+                  <div className="text-xs font-semibold text-zinc-500">Cost of waiting</div>
                   <div className="mt-2 text-sm text-zinc-800">
-                    Every week you wait costs about{" "}
-                    <span className="font-semibold">{moneyRange(perWeekLow, perWeekHigh)}</span>.
+                    Roughly{" "}
+                    <span className="font-semibold">{moneyRange(perWeekLow, perWeekHigh)}</span>{" "}
+                    lost per week.
                   </div>
                   <div className="mt-2 text-xs text-zinc-500">
-                    This is a prioritization estimate, not accounting.
+                    Simple estimate to help you decide fast.
+                  </div>
+                </div>
+
+                <div className="rounded-xl border bg-zinc-50 p-4">
+                  <div className="text-xs font-semibold text-zinc-500">What you can win back</div>
+                  <div className="mt-2 text-sm text-zinc-800">
+                    Fix the top 3 items below and you’ll stop the biggest leak first.
+                  </div>
+                  <div className="mt-2 text-xs text-zinc-500">
+                    Start small. Move fast. Stack wins.
                   </div>
                 </div>
               </div>
 
-              {quickVerdict ? (
-                <div className="mt-6 rounded-xl border p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Verdict</div>
-                  <div className="mt-2 text-sm leading-relaxed text-zinc-900">
-                    {quickVerdict}
-                  </div>
+              <div className="mt-6 rounded-xl border p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Bottom line</div>
+                <div className="mt-2 text-sm leading-relaxed text-zinc-900">
+                  {verdictLine}
                 </div>
-              ) : null}
-
-              <div className="mt-4 text-xs text-zinc-500">{proofLine}</div>
+                <div className="mt-3 text-xs text-zinc-500">{proofLine}</div>
+              </div>
             </div>
 
-            {/* Right: 72h plan (single strong CTA block, not a second dashboard) */}
-            <div className="md:col-span-4">
-              <div className="rounded-2xl bg-zinc-900 p-5 text-white">
+            {/* ACTION CARD — looks premium, reads fast */}
+            <div className="w-full md:w-[360px]">
+              <div className="rounded-2xl bg-zinc-900 p-5 text-white shadow-sm">
                 <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Do this in the next 72 hours
+                  Do this first (72 hours)
                 </div>
                 <div className="mt-2 text-base font-semibold">
-                  Fast wins first (highest leverage)
+                  Quick wins that pay you back
                 </div>
 
                 <ol className="mt-4 space-y-2 list-decimal pl-5 text-sm text-zinc-100">
@@ -252,20 +275,28 @@ export default async function ReportPage({ params }: { params: { shareId: string
                   ))}
                 </ol>
 
-                <div className="mt-4 text-xs text-zinc-300">
-                  If you only do ONE thing: implement #1. It changes what customers expect to pay.
+                <div className="mt-4 rounded-lg bg-white/10 p-3">
+                  <div className="text-xs font-semibold text-zinc-200">One rule</div>
+                  <div className="mt-1 text-xs text-zinc-200 leading-relaxed">
+                    Don’t try to fix everything. Fix #1 first. It changes how customers talk to you and what they accept to pay.
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between text-xs text-zinc-300">
+                  <span>Confidence: {confBadge.text}</span>
+                  <span>Proof: {evidence.length || 0}</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* TOP 3 LEAKS — clear cards, less text density */}
+        {/* LEAKS — cleaner hierarchy, less clutter */}
         <div className="rounded-2xl border bg-white p-7 md:p-8">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Top revenue leaks</div>
-          <h2 className="mt-2 text-xl font-semibold text-zinc-900">Where your profit is bleeding (ranked)</h2>
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Priority list</div>
+          <h2 className="mt-2 text-xl font-semibold text-zinc-900">What’s causing the leak (ranked)</h2>
           <div className="mt-1 text-sm text-zinc-600">
-            Fix these in order. Each one directly maps to how competitors justify higher prices.
+            These are the biggest gaps between you and competitors. Fix them in order.
           </div>
 
           {topLeaks.length ? (
@@ -282,37 +313,37 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     </div>
 
                     <div className="mt-2 text-base font-semibold text-zinc-900">
-                      {safeString(l?.title, "Untitled leak")}
+                      {safeString(l?.title, "Untitled")}
                     </div>
 
                     <div className="mt-3 text-sm text-zinc-700">
-                      <span className="font-semibold">Why it matters:</span>{" "}
+                      <span className="font-semibold">Why it hurts:</span>{" "}
                       {safeString(l?.why_it_matters, "—")}
                     </div>
 
                     <div className="mt-3 text-sm text-zinc-700">
-                      <span className="font-semibold">Proof from market:</span>{" "}
+                      <span className="font-semibold">What competitors do:</span>{" "}
                       {safeString(l?.market_contrast, "—")}
                     </div>
 
                     <div className="mt-3 text-xs text-zinc-500">
-                      Allocation estimate: {Math.round(impact.w * 100)}% of leak range for prioritization.
+                      Planning split: {Math.round(impact.w * 100)}% of leak range (for focus).
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="mt-4 text-sm text-zinc-600">No “top leaks” were generated for this run.</div>
+            <div className="mt-4 text-sm text-zinc-600">No ranked leaks were generated for this run.</div>
           )}
         </div>
 
-        {/* OFFER REBUILD */}
+        {/* OFFER FIXES */}
         <div className="rounded-2xl border bg-white p-7 md:p-8">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Offer rebuild</div>
-          <h2 className="mt-2 text-xl font-semibold text-zinc-900">What to add to your offer (to stop the leak)</h2>
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Fix the offer</div>
+          <h2 className="mt-2 text-xl font-semibold text-zinc-900">What to add (so you can charge more)</h2>
           <div className="mt-1 text-sm text-zinc-600">
-            These are the simplest market levers competitors use to justify higher prices and repeat business.
+            This is how competitors make the same customer worth more money.
           </div>
 
           {offers.length ? (
@@ -325,14 +356,17 @@ export default async function ReportPage({ params }: { params: { shareId: string
               ))}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-zinc-600">No offer rebuild items were generated.</div>
+            <div className="mt-3 text-sm text-zinc-600">No offer upgrades were generated.</div>
           )}
         </div>
 
-        {/* COMPETITOR SNAPSHOT */}
+        {/* COMPETITOR TABLE — official, readable */}
         <div className="rounded-2xl border bg-white p-7 md:p-8">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Competitor snapshot</div>
-          <h2 className="mt-2 text-xl font-semibold text-zinc-900">What competitors offer (simple view)</h2>
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Local comparison</div>
+          <h2 className="mt-2 text-xl font-semibold text-zinc-900">What competitors show publicly</h2>
+          <div className="mt-1 text-sm text-zinc-600">
+            This is the quick view. The detailed proof is in the Proof Locker.
+          </div>
 
           <div className="mt-5 overflow-hidden rounded-xl border">
             <div className="grid grid-cols-12 bg-zinc-100 px-4 py-3 text-xs font-semibold text-zinc-600">
@@ -349,7 +383,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     <div className="font-semibold text-zinc-900">{r.name}</div>
                     {r.url ? (
                       <a className="text-xs text-zinc-500 hover:underline" href={r.url} target="_blank" rel="noreferrer">
-                        {r.url.replace(/^https?:\/\//, "")}
+                        {shortHost(r.url)}
                       </a>
                     ) : null}
                   </div>
@@ -362,18 +396,26 @@ export default async function ReportPage({ params }: { params: { shareId: string
               <div className="px-4 py-4 text-sm text-zinc-600">No competitors were extracted for this run.</div>
             )}
           </div>
-
-          <div className="mt-3 text-xs text-zinc-500">
-            This is the simplified view. The raw proof is in the Proof Locker below.
-          </div>
         </div>
 
-        {/* PROOF LOCKER */}
+        {/* PROOF LOCKER — trust, not noise */}
         <div className="rounded-2xl border bg-white p-7 md:p-8">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Proof locker</div>
-          <h2 className="mt-2 text-xl font-semibold text-zinc-900">Evidence (optional — open if you want to verify)</h2>
-          <div className="mt-2 text-sm text-zinc-600">
-            We collected this proof from competitor sites. You can forward it to a partner or manager.
+          <div className="flex items-start justify-between gap-6">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Proof locker</div>
+              <h2 className="mt-2 text-xl font-semibold text-zinc-900">Proof (open if you want to verify)</h2>
+              <div className="mt-1 text-sm text-zinc-600">
+                We pulled this from competitor sites (pricing pages, membership pages, warranty text, etc).
+              </div>
+            </div>
+            <div className="hidden sm:flex items-center gap-2">
+              <div className="rounded-full border bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-900">
+                Snippets: {evidence.length || 0}
+              </div>
+              <div className="rounded-full border bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-900">
+                Competitors: {competitors.length || 0}
+              </div>
+            </div>
           </div>
 
           <details className="mt-5 rounded-xl border bg-zinc-50 p-4">
@@ -390,8 +432,8 @@ export default async function ReportPage({ params }: { params: { shareId: string
                         <div className="text-xs font-semibold text-zinc-500">
                           {evidenceTypeLabel(safeString(e?.type))} •{" "}
                           <span className="font-normal">
-                            {safeString(e?.source_url, "").replace(/^https?:\/\//, "").slice(0, 70)}
-                            {safeString(e?.source_url, "").length > 70 ? "…" : ""}
+                            {shortHost(safeString(e?.source_url, "")).slice(0, 72)}
+                            {safeString(e?.source_url, "").length > 72 ? "…" : ""}
                           </span>
                         </div>
                         <div className="mt-1 text-sm text-zinc-900 truncate">
@@ -425,12 +467,12 @@ export default async function ReportPage({ params }: { params: { shareId: string
           </details>
         </div>
 
-        {/* NEXT 7 DAYS */}
+        {/* NEXT 7 DAYS — clean and decisive */}
         <div className="rounded-2xl border bg-zinc-900 p-7 md:p-8 text-white">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">Next 7 days plan</div>
-          <h2 className="mt-2 text-xl font-semibold">Make the leak stop</h2>
-          <div className="mt-2 text-sm text-zinc-300">
-            Execute in order. Don’t overthink it — fix the market levers first.
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">Next 7 days</div>
+          <h2 className="mt-2 text-xl font-semibold">Your simple plan</h2>
+          <div className="mt-1 text-sm text-zinc-300">
+            Do this in order. Don’t add extra steps. Get the money back first.
           </div>
 
           <ol className="mt-5 space-y-2 list-decimal pl-5 text-sm text-zinc-100">
