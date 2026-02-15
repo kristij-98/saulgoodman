@@ -3,120 +3,96 @@ import { ExtractedData } from "../shared/schema/extractor.zod";
 export interface ScoreResult {
   confidence: "HIGH" | "MED" | "LOW";
   price_corridor: "low" | "mid" | "high" | "unknown";
+
   patterns: {
     membership_common: boolean;
     fees_common: boolean;
     warranty_common: boolean;
   };
 
-  // NEW: make money unavoidable
-  inputs_used: {
-    jobs_per_month: number;
-    avg_ticket: number;
+  // NEW: financial delta
+  delta: {
+    revenue_gap_per_job: number;
+    estimated_jobs_per_month: number;
+    revenue_gap_per_month: number;
+    revenue_gap_per_year: number;
   };
 
-  // NEW: ranges (because reality)
+  // NEW: structured leak snapshot
   leaks: {
-    per_job_low: number;
-    per_job_high: number;
     per_month_low: number;
     per_month_high: number;
     per_year_low: number;
     per_year_high: number;
   };
 
-  // keep the old upside (still useful)
-  upside: {
-    potential_revenue_increase: string;
-    description: string;
+  inputs_used: {
+    jobs_per_month: number;
+    avg_ticket: number;
   };
-
-  assumptions: string[];
-}
-
-function clampNumber(n: any, fallback: number) {
-  const x = Number(n);
-  return Number.isFinite(x) ? x : fallback;
 }
 
 export function computeBenchmark(clientData: any, extracted: ExtractedData): ScoreResult {
   const competitorCount = extracted.competitors.length;
-  const pricingEvidenceCount = extracted.competitors.filter(c => (c.pricing_signals || []).length > 0).length;
+  const pricingEvidenceCount = extracted.competitors.filter(c => c.pricing_signals.length > 0).length;
 
-  // 1) Confidence
+  // Confidence logic
   let confidence: "HIGH" | "MED" | "LOW" = "LOW";
-  if (competitorCount >= 5 && pricingEvidenceCount >= 3) confidence = "HIGH";
-  else if (competitorCount >= 3) confidence = "MED";
+  if (competitorCount >= 5 && pricingEvidenceCount >= 3) {
+    confidence = "HIGH";
+  } else if (competitorCount >= 3) {
+    confidence = "MED";
+  }
 
-  // 2) Pattern recognition
-  const membershipCount = extracted.competitors.filter(c => !!c.membership_offer).length;
-  const feeCount = extracted.competitors.filter(c => !!c.trip_fee).length;
-  const warrantyCount = extracted.competitors.filter(c => !!c.warranty_offer).length;
+  const membershipCount = extracted.competitors.filter(c => c.membership_offer).length;
+  const feeCount = extracted.competitors.filter(c => c.trip_fee).length;
+  const warrantyCount = extracted.competitors.filter(c => c.warranty_offer).length;
 
   const patterns = {
-    membership_common: competitorCount ? membershipCount > competitorCount * 0.3 : false,
-    fees_common: competitorCount ? feeCount > competitorCount * 0.4 : false,
-    warranty_common: competitorCount ? warrantyCount > competitorCount * 0.5 : false
+    membership_common: membershipCount > competitorCount * 0.3,
+    fees_common: feeCount > competitorCount * 0.4,
+    warranty_common: warrantyCount > competitorCount * 0.5
   };
 
-  // 3) Inputs from intake (make it personal)
-  const jobsMin = clampNumber(clientData?.jobs_min, 0);
-  const jobsMax = clampNumber(clientData?.jobs_max, jobsMin);
-  const ticketMin = clampNumber(clientData?.ticket_min, 0);
-  const ticketMax = clampNumber(clientData?.ticket_max, ticketMin);
+  const avgTicket = (clientData.ticket_min + clientData.ticket_max) / 2;
+  const jobsPerMonth = (clientData.jobs_min + clientData.jobs_max) / 2;
 
-  const jobsPerMonth = Math.max(0, Math.round((jobsMin + jobsMax) / 2));
-  const avgTicket = Math.max(0, (ticketMin + ticketMax) / 2);
+  // Conservative 15–30% structural upside range
+  const lowMultiplier = 0.15;
+  const highMultiplier = 0.30;
 
-  // 4) Leak model (simple, believable, and ranges)
-  // Conservative: 10–25% revenue lift range based on market patterns.
-  // Higher if memberships common + fees common.
-  let lowPct = 0.10;
-  let highPct = 0.25;
+  const revenueGapPerJobLow = avgTicket * lowMultiplier;
+  const revenueGapPerJobHigh = avgTicket * highMultiplier;
 
-  if (patterns.membership_common) highPct += 0.05;
-  if (patterns.fees_common) highPct += 0.03;
-  if (patterns.warranty_common) highPct += 0.02;
-
-  // cap high to stay believable
-  highPct = Math.min(highPct, 0.35);
-
-  const perJobLow = avgTicket * lowPct;
-  const perJobHigh = avgTicket * highPct;
-
-  const perMonthLow = perJobLow * jobsPerMonth;
-  const perMonthHigh = perJobHigh * jobsPerMonth;
+  const perMonthLow = revenueGapPerJobLow * jobsPerMonth;
+  const perMonthHigh = revenueGapPerJobHigh * jobsPerMonth;
 
   const perYearLow = perMonthLow * 12;
   const perYearHigh = perMonthHigh * 12;
 
-  const assumptions: string[] = [
-    `Jobs/month estimated from intake: avg(jobs_min, jobs_max) = ${jobsPerMonth}`,
-    `Avg ticket estimated from intake: avg(ticket_min, ticket_max) = ${Math.round(avgTicket)}`,
-    `Leak % range used: ${(lowPct * 100).toFixed(0)}%–${(highPct * 100).toFixed(0)}% (adjusted by market patterns)`
-  ];
-
-  const prettyMid = Math.floor(((perMonthLow + perMonthHigh) / 2));
   return {
     confidence,
     price_corridor: pricingEvidenceCount > 0 ? "mid" : "unknown",
+
     patterns,
+
+    delta: {
+      revenue_gap_per_job: revenueGapPerJobHigh,
+      estimated_jobs_per_month: jobsPerMonth,
+      revenue_gap_per_month: perMonthHigh,
+      revenue_gap_per_year: perYearHigh
+    },
+
+    leaks: {
+      per_month_low: Math.round(perMonthLow),
+      per_month_high: Math.round(perMonthHigh),
+      per_year_low: Math.round(perYearLow),
+      per_year_high: Math.round(perYearHigh)
+    },
+
     inputs_used: {
       jobs_per_month: jobsPerMonth,
       avg_ticket: avgTicket
-    },
-    leaks: {
-      per_job_low: perJobLow,
-      per_job_high: perJobHigh,
-      per_month_low: perMonthLow,
-      per_month_high: perMonthHigh,
-      per_year_low: perYearLow,
-      per_year_high: perYearHigh
-    },
-    upside: {
-      potential_revenue_increase: `$${prettyMid}/mo`,
-      description: "Conservative estimate based on your volume + ticket and market patterns (fees, memberships, warranties)."
-    },
-    assumptions
+    }
   };
 }
