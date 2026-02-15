@@ -1,0 +1,31 @@
+name: Prisma Guard
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if prisma/schema.prisma is missing or empty
+        run: |
+          if [ ! -f prisma/schema.prisma ]; then
+            echo "ERROR: prisma/schema.prisma is missing."
+            exit 1
+          fi
+
+          if [ ! -s prisma/schema.prisma ]; then
+            echo "ERROR: prisma/schema.prisma is empty."
+            exit 1
+          fi
+
+      - name: Fail if datasource/generator/models are missing
+        run: |
+          grep -q "datasource db" prisma/schema.prisma || (echo "ERROR: Missing 'datasource db' in schema.prisma" && exit 1)
+          grep -q "generator client" prisma/schema.prisma || (echo "ERROR: Missing 'generator client' in schema.prisma" && exit 1)
+          grep -q "model " prisma/schema.prisma || (echo "ERROR: No models found in schema.prisma" && exit 1)
+
+          echo "Prisma schema looks OK."
