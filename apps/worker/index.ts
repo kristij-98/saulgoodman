@@ -177,7 +177,7 @@ async function runAuditJob(job: any) {
       data: {
         caseId: caseId,
         shareId: nanoid(10),
-        payloadJson: finalReport
+        content: finalReport as any
       }
     });
 
