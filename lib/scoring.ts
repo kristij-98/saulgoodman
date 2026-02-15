@@ -1,53 +1,181 @@
 import { ExtractedData } from "../shared/schema/extractor.zod";
 
-interface ScoreResult {
-  confidence: "HIGH" | "MED" | "LOW";
-  price_corridor: "low" | "mid" | "high" | "unknown";
-  patterns: {
-    membership_common: boolean;
-    fees_common: boolean;
-    warranty_common: boolean;
+export interface ScoreResult {
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+
+  marketAverages: {
+    avg_ticket: number | null;
+    avg_trip_fee: number | null;
+    membership_adoption_rate: number;
+    warranty_adoption_rate: number;
   };
-  upside: {
-    potential_revenue_increase: string;
-    description: string;
+
+  clientPosition: {
+    ticket_position: "below" | "aligned" | "above" | "unknown";
+    trip_fee_position: "below" | "aligned" | "above" | "unknown";
+    membership_position: "missing" | "aligned" | "strong";
+    warranty_position: "missing" | "aligned" | "strong";
+  };
+
+  delta: {
+    ticket_gap: number | null;
+    trip_fee_gap: number | null;
+    membership_gap_score: number;
+    warranty_gap_score: number;
   };
 }
 
-export function computeBenchmark(clientData: any, extracted: ExtractedData): ScoreResult {
-  const competitorCount = extracted.competitors.length;
-  const pricingEvidenceCount = extracted.competitors.filter(c => c.pricing_signals.length > 0).length;
-  
-  // 1. Confidence Score
-  let confidence: "HIGH" | "MED" | "LOW" = "LOW";
-  if (competitorCount >= 5 && pricingEvidenceCount >= 3) {
+function extractNumber(str: string | null | undefined): number | null {
+  if (!str) return null;
+  const match = str.match(/\$?(\d+(\.\d+)?)/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+function average(nums: number[]): number | null {
+  if (nums.length === 0) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+export function computeBenchmark(
+  clientData: any,
+  extracted: ExtractedData
+): ScoreResult {
+  const competitors = extracted.competitors;
+  const competitorCount = competitors.length;
+
+  // ----------------------------------------
+  // CONFIDENCE
+  // ----------------------------------------
+  const pricingEvidenceCount = competitors.filter(
+    (c) => c.pricing_signals.length > 0
+  ).length;
+
+  let confidence: "HIGH" | "MEDIUM" | "LOW" = "LOW";
+
+  if (competitorCount >= 6 && pricingEvidenceCount >= 4) {
     confidence = "HIGH";
   } else if (competitorCount >= 3) {
-    confidence = "MED";
+    confidence = "MEDIUM";
   }
 
-  // 2. Pattern Recognition
-  const membershipCount = extracted.competitors.filter(c => c.membership_offer).length;
-  const feeCount = extracted.competitors.filter(c => c.trip_fee).length;
-  const warrantyCount = extracted.competitors.filter(c => c.warranty_offer).length;
+  // ----------------------------------------
+  // MARKET AVERAGES
+  // ----------------------------------------
+  const competitorTickets: number[] = [];
+  const competitorTripFees: number[] = [];
 
-  const patterns = {
-    membership_common: membershipCount > competitorCount * 0.3, // >30% have memberships
-    fees_common: feeCount > competitorCount * 0.4,
-    warranty_common: warrantyCount > competitorCount * 0.5
-  };
+  competitors.forEach((c) => {
+    c.pricing_signals.forEach((p) => {
+      const n = extractNumber(p);
+      if (n) competitorTickets.push(n);
+    });
 
-  // 3. Upside Calculation (Simple deterministic logic)
-  const currentTicket = (clientData.ticket_min + clientData.ticket_max) / 2;
-  const potentialIncrease = currentTicket * 0.20; // Conservative 20% upside assumption for baseline
+    const fee = extractNumber(c.trip_fee);
+    if (fee) competitorTripFees.push(fee);
+  });
+
+  const avg_ticket = average(competitorTickets);
+  const avg_trip_fee = average(competitorTripFees);
+
+  const membership_adoption_rate =
+    competitorCount === 0
+      ? 0
+      : competitors.filter((c) => c.membership_offer).length /
+        competitorCount;
+
+  const warranty_adoption_rate =
+    competitorCount === 0
+      ? 0
+      : competitors.filter((c) => c.warranty_offer).length /
+        competitorCount;
+
+  // ----------------------------------------
+  // CLIENT POSITIONING
+  // ----------------------------------------
+  const clientTicket =
+    (clientData.ticket_min + clientData.ticket_max) / 2 || null;
+
+  const clientTripFee = extractNumber(clientData.trip_fee);
+
+  let ticket_position: "below" | "aligned" | "above" | "unknown" =
+    "unknown";
+
+  if (avg_ticket && clientTicket) {
+    if (clientTicket < avg_ticket * 0.9) ticket_position = "below";
+    else if (clientTicket > avg_ticket * 1.1) ticket_position = "above";
+    else ticket_position = "aligned";
+  }
+
+  let trip_fee_position: "below" | "aligned" | "above" | "unknown" =
+    "unknown";
+
+  if (avg_trip_fee && clientTripFee) {
+    if (clientTripFee < avg_trip_fee * 0.9) trip_fee_position = "below";
+    else if (clientTripFee > avg_trip_fee * 1.1) trip_fee_position = "above";
+    else trip_fee_position = "aligned";
+  }
+
+  const membership_position =
+    clientData.has_membership
+      ? membership_adoption_rate > 0.5
+        ? "aligned"
+        : "strong"
+      : "missing";
+
+  const warranty_position =
+    clientData.warranty
+      ? warranty_adoption_rate > 0.5
+        ? "aligned"
+        : "strong"
+      : "missing";
+
+  // ----------------------------------------
+  // DELTAS
+  // ----------------------------------------
+  const ticket_gap =
+    avg_ticket && clientTicket ? clientTicket - avg_ticket : null;
+
+  const trip_fee_gap =
+    avg_trip_fee && clientTripFee
+      ? clientTripFee - avg_trip_fee
+      : null;
+
+  const membership_gap_score =
+    clientData.has_membership
+      ? 0
+      : membership_adoption_rate > 0.4
+      ? 1
+      : 0;
+
+  const warranty_gap_score =
+    clientData.warranty
+      ? 0
+      : warranty_adoption_rate > 0.4
+      ? 1
+      : 0;
 
   return {
     confidence,
-    price_corridor: pricingEvidenceCount > 0 ? "mid" : "unknown", // Simplified for MVP
-    patterns,
-    upside: {
-      potential_revenue_increase: `$${Math.floor(potentialIncrease)}`,
-      description: "Based on premium positioning and membership attach rates observed in market leaders."
-    }
+
+    marketAverages: {
+      avg_ticket,
+      avg_trip_fee,
+      membership_adoption_rate,
+      warranty_adoption_rate,
+    },
+
+    clientPosition: {
+      ticket_position,
+      trip_fee_position,
+      membership_position,
+      warranty_position,
+    },
+
+    delta: {
+      ticket_gap,
+      trip_fee_gap,
+      membership_gap_score,
+      warranty_gap_score,
+    },
   };
 }
