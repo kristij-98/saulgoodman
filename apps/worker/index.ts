@@ -1,7 +1,7 @@
 import PgBoss from 'pg-boss';
 import { PrismaClient } from '@prisma/client';
 import { GoogleGenAI } from "@google/genai";
-import { IntakeSchema, ExtractedDataSchema, ExtractedData } from '../../shared/schema/extractor.zod';
+import { ExtractedDataSchema, ExtractedData } from '../../shared/schema/extractor.zod';
 import { ReportSchema } from '../../shared/schema/report.zod';
 import { computeBenchmark } from '../../lib/scoring';
 import { nanoid } from 'nanoid';
@@ -19,36 +19,88 @@ const prisma = new PrismaClient();
 const boss = new PgBoss(DATABASE_URL);
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+// --- HELPERS (Step 2: reliability) ---
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); })
+     .catch((e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+function safeJsonParse(text: string): any | null {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 // --- PROMPTS ---
 const RESEARCH_PROMPT = `
 You are a senior market researcher. Find 6-10 direct competitors for a specific business in a specific location.
 Focus on extracting SPECIFIC EVIDENCE of pricing, diagnostic fees, memberships, and warranties.
-If specific pricing isn't on the homepage, look for "pricing", "services", or "about" pages.
+If specific pricing isn't on the homepage, look for "pricing", "services", "membership", "financing", "warranty", or "about" pages.
+
 Output format: Plain text with URLs and extracted raw snippets.
 `;
 
-const EXTRACTOR_PROMPT = `
-Convert the provided research text into strict JSON format matching the following schema.
-Extract 'evidence' separately. Every claim in 'competitors' must reference an evidence_id.
-Return ONLY JSON.
+const EXTRACTOR_JSON_SHAPE = `
+{
+  "competitors": [
+    {
+      "name": "string",
+      "url": "string",
+      "services": ["string"],
+      "pricing_signals": ["string"],
+      "trip_fee": null,
+      "membership_offer": null,
+      "warranty_offer": null,
+      "premium_signals": ["string"],
+      "evidence_ids": ["e1","e2"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "e1",
+      "source_url": "https://example.com/page",
+      "snippet": "raw text snippet copied from the page",
+      "type": "pricing|service|reputation|guarantee|other"
+    }
+  ]
+}
 `;
 
+const EXTRACTOR_PROMPT = `
+You are a strict data extractor.
+
+TASK:
+Convert the provided research text into JSON ONLY, matching EXACTLY the following shape:
+
+${EXTRACTOR_JSON_SHAPE}
+
+RULES:
+- Return ONLY JSON. No markdown. No commentary.
+- NEVER omit keys. If unknown, use null for nullable fields and [] for arrays.
+- Every competitor should have evidence_ids (can be empty []).
+- Every evidence item MUST have id, source_url, snippet, type.
+- type MUST be one of: pricing, service, reputation, guarantee, other.
+`;
+
+// Composer prompt stays blunt but JSON must match ReportSchema defaults
 const COMPOSER_PROMPT = `
 You are "Profit Leak Attorney", a confident, blunt, high-ticket consultant.
 Write a strategic audit report based on the provided client data, competitor analysis, and computed benchmarks.
 Tone: Expert, no-nonsense, "fixer" vibe. No fluff.
 
-Return valid JSON with these keys:
+Return JSON with keys:
 - quick_verdict
 - scorecard_rows
 - offer_rebuild
 - scripts
 - next_7_days
 - assumptions_ledger
+
+Return ONLY JSON.
 `;
 
 // --- WORKER LOGIC ---
-
 async function runAuditJob(job: any) {
   const { caseId, jobId } = job.data;
   console.log(`[Job ${jobId}] Starting audit for Case ${caseId}`);
@@ -73,11 +125,15 @@ async function runAuditJob(job: any) {
     const vitals = caseData.vitals as any;
     const query = `${caseData.whatTheySell} companies in ${caseData.location} pricing membership reviews`;
 
-    const researchResult = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`,
-      config: { tools: [{ googleSearch: {} }] }
-    });
+    const researchResult = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `SEARCH QUERY: ${query}\n\n${RESEARCH_PROMPT}`,
+        config: { tools: [{ googleSearch: {} }] }
+      }),
+      45000,
+      "Research"
+    );
 
     const researchText = researchResult.text || "";
 
@@ -94,7 +150,7 @@ async function runAuditJob(job: any) {
     const allSourceUrls = Array.from(new Set([...groundingUrls, ...textUrls]));
 
     // -------------------------
-    // STAGE 2: EXTRACTION
+    // STAGE 2: EXTRACTION (Step 2 hardened)
     // -------------------------
     await updateStage("Evidence Extraction", 40);
 
@@ -106,23 +162,55 @@ SOURCES FOUND:
 ${allSourceUrls.join(', ')}
 `;
 
-    const extractorResult = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: EXTRACTOR_PROMPT + "\n\n" + extractorInput,
-      config: { responseMimeType: "application/json" }
-    });
+    const callExtractor = async (prompt: string) => {
+      return await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt,
+          config: { responseMimeType: "application/json" }
+        }),
+        45000,
+        "Extractor"
+      );
+    };
 
-    const extractedJsonRaw = extractorResult.text || "{}";
-    let extractedData: ExtractedData;
+    let extractedData: ExtractedData | null = null;
 
-    try {
-      extractedData = ExtractedDataSchema.parse(JSON.parse(extractedJsonRaw));
-    } catch (e) {
-      console.error("Extractor failed, using safe fallback.");
-      extractedData = ExtractedDataSchema.parse({
-        competitors: [],
-        evidence: []
-      });
+    // Attempt 1
+    const extractorResult1 = await callExtractor(EXTRACTOR_PROMPT + "\n\n" + extractorInput);
+    const json1 = safeJsonParse(extractorResult1.text || "");
+    if (json1) {
+      try {
+        extractedData = ExtractedDataSchema.parse(json1);
+      } catch (e) {
+        extractedData = null;
+      }
+    }
+
+    // Attempt 2 (Repair)
+    if (!extractedData) {
+      console.error("Extractor output invalid. Retrying with repair prompt...");
+      const repairPrompt =
+        `Your previous output was invalid or missing required keys.\n` +
+        `Return ONLY valid JSON matching EXACTLY this shape:\n${EXTRACTOR_JSON_SHAPE}\n\n` +
+        `Rules: never omit keys, unknown => null or [], type must be one of pricing|service|reputation|guarantee|other.\n\n` +
+        `Now re-extract from this input:\n${extractorInput}`;
+
+      const extractorResult2 = await callExtractor(repairPrompt);
+      const json2 = safeJsonParse(extractorResult2.text || "");
+      if (json2) {
+        try {
+          extractedData = ExtractedDataSchema.parse(json2);
+        } catch (e) {
+          extractedData = null;
+        }
+      }
+    }
+
+    // Final fallback (never fail job)
+    if (!extractedData) {
+      console.error("Extractor failed twice. Using empty extracted data fallback.");
+      extractedData = ExtractedDataSchema.parse({ competitors: [], evidence: [] });
     }
 
     // -------------------------
@@ -142,11 +230,15 @@ ${allSourceUrls.join(', ')}
       benchmark
     });
 
-    const composerResult = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: COMPOSER_PROMPT + "\n\n" + composerInput,
-      config: { responseMimeType: "application/json" }
-    });
+    const composerResult = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: COMPOSER_PROMPT + "\n\n" + composerInput,
+        config: { responseMimeType: "application/json" }
+      }),
+      60000,
+      "Composer"
+    );
 
     let rawComposer: any = {};
     try {
