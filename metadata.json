@@ -1,0 +1,5 @@
+{
+  "name": "Profit Leak Attorney",
+  "description": "A production-grade SaaS for business audits using Gemini and Postgres-backed queues.",
+  "requestFramePermissions": []
+}

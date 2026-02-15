@@ -1,0 +1,39 @@
+{
+  "name": "profit-leak-attorney",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "ts-node --project tsconfig.worker.json apps/worker/index.ts",
+    "lint": "next lint",
+    "db:push": "prisma db push"
+  },
+  "dependencies": {
+    "@google/genai": "^0.2.1",
+    "@prisma/client": "^5.10.2",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "lucide-react": "^0.344.0",
+    "nanoid": "^5.0.6",
+    "next": "14.1.0",
+    "pg-boss": "^9.0.3",
+    "react": "^18",
+    "react-dom": "^18",
+    "react-hook-form": "^7.51.0",
+    "tailwind-merge": "^2.2.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.0.1",
+    "postcss": "^8",
+    "prisma": "^5.10.2",
+    "tailwindcss": "^3.3.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}
