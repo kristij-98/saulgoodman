@@ -1,16 +1,31 @@
 // app/r/[shareId]/page.tsx
+import React from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
+import {
+  LucideAlertTriangle,
+  LucideCheck,
+  LucideExternalLink,
+  LucideSearch,
+  LucideFileText,
+  LucideTrendingDown,
+  LucideAlertOctagon,
+} from "lucide-react";
+
 type ReportAny = any;
+
+// -------------------- Helpers --------------------
 
 function safeArray<T = any>(v: any): T[] {
   return Array.isArray(v) ? v : [];
 }
+
 function safeString(v: any, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
+
 function num(v: any): number | null {
   if (v === null || v === undefined) return null;
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -20,78 +35,208 @@ function num(v: any): number | null {
   }
   return null;
 }
+
+// Format: $1,200
 function money(n: number | null): string {
   if (n === null) return "—";
   return `$${Math.round(n).toLocaleString()}`;
 }
+
+// Format: $1.2k (compact)
+function moneyCompact(n: number | null): string {
+  if (n === null) return "—";
+  if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${Math.round(n).toLocaleString()}`;
+}
+
 function moneyRange(lo: number | null, hi: number | null): string {
   if (lo === null && hi === null) return "—";
   if (lo !== null && hi === null) return money(lo);
   if (lo === null && hi !== null) return money(hi);
   return `${money(lo)}–${money(hi)}`;
 }
+
 function shortHost(url: string) {
-  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return (url || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "")
+    .replace(/^www\./, "");
 }
 
-function badge(conf: string) {
-  const c = (conf || "").toUpperCase();
-  if (c === "HIGH") return { text: "HIGH", cls: "bg-emerald-50 text-emerald-900 ring-emerald-200" };
-  if (c === "MED") return { text: "MEDIUM", cls: "bg-amber-50 text-amber-900 ring-amber-200" };
-  return { text: "LOW", cls: "bg-rose-50 text-rose-900 ring-rose-200" };
-}
-
-function pickTopActions(report: ReportAny): string[] {
-  const next = safeArray<string>(report?.next_7_days).filter(Boolean);
-  if (next.length) return next.slice(0, 5);
-
-  const offers = safeArray(report?.offer_rebuild)
-    .map((o: any) => safeString(o?.title).trim())
-    .filter(Boolean);
-  if (offers.length) return offers.slice(0, 5).map((t) => `Add: ${t}`);
-
-  return [
-    "Set a standard dispatch / trip fee (and waive it for members).",
-    "Add a simple membership plan so you get recurring money each month.",
-    "Show a clear price range on your site so buyers trust you faster.",
-  ];
-}
-
-function evidenceTypeLabel(t: string) {
+function normalizeEvidenceType(t: string) {
   const x = (t || "").toLowerCase();
   if (x === "pricing") return "Pricing";
   if (x === "service") return "Service";
   if (x === "reputation") return "Reviews";
   if (x === "guarantee") return "Warranty";
-  return "Other";
+  if (x === "warranty") return "Warranty";
+  if (x === "membership") return "Membership";
+  return t ? t : "Evidence";
 }
 
-// Planning estimate ONLY (helps prioritize; not pretending precision)
-function allocateLeakImpact(perMonthLow: number | null, perMonthHigh: number | null, idx: number) {
-  const weights = [0.45, 0.35, 0.20];
-  const w = weights[idx] ?? 0.2;
-  const lo = perMonthLow === null ? null : perMonthLow * w;
-  const hi = perMonthHigh === null ? null : perMonthHigh * w;
-  return { lo, hi, w };
+function pickTopActions(report: ReportAny): string[] {
+  const next = safeArray<string>(report?.next_7_days).filter(Boolean);
+  if (next.length) return next;
+
+  const offers = safeArray(report?.offer_rebuild)
+    .map((o: any) => safeString(o?.title).trim())
+    .filter(Boolean);
+
+  if (offers.length) return offers.map((t) => `Add: ${t}`);
+
+  return [
+    "Set a standard trip/dispatch fee (and waive it for members).",
+    "Add a membership plan so you get recurring money each month.",
+    "Put simple pricing ranges on your website (so people trust you faster).",
+  ];
 }
 
-function SectionTitle({ kicker, title, subtitle }: { kicker: string; title: string; subtitle?: string }) {
+function getLeakNumbers(data: ReportAny) {
+  // Supports multiple shapes so UI won’t break as you evolve scoring.
+  const leakSources = [
+    data?.benchmark_data?.leaks,
+    data?.benchmark_data?.delta?.leaks,
+    data?.delta?.leaks,
+    data?.benchmark_data?.leak_estimate,
+    data?.delta?.leak_estimate,
+    data?.benchmark_data?.upside, // sometimes devs put numbers here; won’t crash
+  ].filter(Boolean);
+
+  function pick(keys: string[]) {
+    for (const obj of leakSources) {
+      for (const k of keys) {
+        const n = num((obj as any)?.[k]);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  }
+
+  const perMonthLow = pick(["per_month_low", "monthly_low", "month_low"]);
+  const perMonthHigh = pick(["per_month_high", "monthly_high", "month_high"]);
+  const perYearLow = pick(["per_year_low", "yearly_low", "year_low"]);
+  const perYearHigh = pick(["per_year_high", "yearly_high", "year_high"]);
+
+  const finalPerMonthLow = perMonthLow ?? perMonthHigh;
+  const finalPerMonthHigh = perMonthHigh ?? perMonthLow;
+
+  const finalPerYearLow = perYearLow ?? (finalPerMonthLow !== null ? finalPerMonthLow * 12 : null);
+  const finalPerYearHigh = perYearHigh ?? (finalPerMonthHigh !== null ? finalPerMonthHigh * 12 : null);
+
+  return {
+    perMonthLow,
+    perMonthHigh,
+    perYearLow,
+    perYearHigh,
+    finalPerMonthLow,
+    finalPerMonthHigh,
+    finalPerYearLow,
+    finalPerYearHigh,
+  };
+}
+
+// Attempt to display competitor name for evidence entries
+function inferEvidenceCompetitorName(e: any, competitors: any[]) {
+  // If your backend ever adds competitor, use it
+  const direct = safeString(e?.competitor, "");
+  if (direct) return direct;
+
+  const url = safeString(e?.source_url, "");
+  const host = shortHost(url);
+  if (!host) return "Competitor";
+
+  // Match host against competitor url host
+  const match = competitors.find((c: any) => {
+    const cu = safeString(c?.url, "");
+    if (!cu) return false;
+    return shortHost(cu) && host.includes(shortHost(cu));
+  });
+
+  return safeString(match?.name, host);
+}
+
+// -------------------- Components --------------------
+
+function ConfidenceBadge({ level }: { level: string }) {
+  const c = (level || "").toUpperCase();
+  let colors = "bg-zinc-100 text-zinc-600 ring-zinc-200";
+  let label = "Low Confidence";
+
+  if (c === "HIGH") {
+    colors = "bg-emerald-50 text-emerald-700 ring-emerald-200/50";
+    label = "High Confidence";
+  } else if (c === "MED") {
+    colors = "bg-amber-50 text-amber-700 ring-amber-200/50";
+    label = "Medium Confidence";
+  }
+
   return (
-    <div>
-      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{kicker}</div>
-      <h2 className="mt-2 text-xl md:text-2xl font-semibold tracking-tight text-zinc-900">{title}</h2>
-      {subtitle ? <div className="mt-1 text-sm text-zinc-600">{subtitle}</div> : null}
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium tracking-wide ring-1 ring-inset ${colors}`}
+    >
+      <span className="relative flex h-1.5 w-1.5">
+        <span
+          className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
+            c === "HIGH" ? "bg-emerald-500 animate-pulse" : "bg-current"
+          }`}
+        ></span>
+        <span
+          className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+            c === "HIGH" ? "bg-emerald-600" : "bg-current"
+          }`}
+        ></span>
+      </span>
+      {label}
+    </span>
+  );
+}
+
+function SectionHeader({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h3 className="text-lg font-bold text-zinc-900">{title}</h3>
+        {subtitle && <p className="text-sm text-zinc-500 max-w-2xl">{subtitle}</p>}
+      </div>
+      {action && <div className="mt-2 sm:mt-0">{action}</div>}
     </div>
   );
 }
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function Card({
+  children,
+  className = "",
+  noPad = false,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  noPad?: boolean;
+}) {
   return (
-    <div className={`rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm ${className}`}>
-      {children}
+    <div className={`overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm ${className}`}>
+      <div className={noPad ? "" : "p-5 md:p-6"}>{children}</div>
     </div>
   );
 }
+
+function ImpactBadge({ value }: { value: string }) {
+  return (
+    <span className="inline-flex items-center rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-100">
+      -{value}/mo
+    </span>
+  );
+}
+
+// -------------------- Page --------------------
 
 export default async function ReportPage({ params }: { params: { shareId: string } }) {
   const shareId = params.shareId;
@@ -106,406 +251,403 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const data = (reportRow.content ?? {}) as ReportAny;
 
   const meta = data?.meta ?? {};
-  const confidence = safeString(meta?.confidence, "LOW") as "HIGH" | "MED" | "LOW";
-  const confBadge = badge(confidence);
-
-  const quickVerdict = safeString(data?.quick_verdict, "");
-  const marketPosition = safeString(data?.market_position, "");
+  const confidence = safeString(meta?.confidence, "LOW");
 
   const topLeaks = safeArray(data?.top_leaks_ranked);
   const offers = safeArray(data?.offer_rebuild);
   const competitors = safeArray(data?.competitors);
   const evidence = safeArray(data?.evidence_drawer);
 
-  const actions = pickTopActions(data);
-  const do72 = actions.slice(0, 3);
+  const marketPosition = safeString(data?.market_position, "");
 
-  // Pull leak numbers from multiple possible shapes (so UI won't break as scoring evolves)
-  const leakCandidates = [
-    data?.benchmark_data?.leaks,
-    data?.benchmark_data?.delta?.leaks,
-    data?.delta?.leaks,
-    data?.benchmark_data?.leak_estimate,
-    data?.delta?.leak_estimate,
-  ].filter(Boolean);
+  const leakNums = getLeakNumbers(data);
 
-  function pickLeakNumber(keys: string[]): number | null {
-    for (const obj of leakCandidates) {
-      for (const k of keys) {
-        const n = num((obj as any)?.[k]);
-        if (n !== null) return n;
-      }
-    }
-    return null;
-  }
+  const nextActionsAll = pickTopActions(data).filter(Boolean);
+  const doFirst = nextActionsAll.slice(0, 3);
+  const competitorCount = competitors.length;
 
-  const perMonthLow = pickLeakNumber(["per_month_low", "monthly_low", "month_low", "leak_month_low"]);
-  const perMonthHigh = pickLeakNumber(["per_month_high", "monthly_high", "month_high", "leak_month_high"]);
-  const perYearLow = pickLeakNumber(["per_year_low", "yearly_low", "year_low", "leak_year_low"]);
-  const perYearHigh = pickLeakNumber(["per_year_high", "yearly_high", "year_high", "leak_year_high"]);
+  // Email button: mailto (no backend needed, no client JS needed)
+  const emailSubject = encodeURIComponent("My ProfitAudit Action Plan");
+  const emailBody = encodeURIComponent(
+    `Here is the 72-hour plan:\n\n${doFirst.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\nReport link: ${shareId}`
+  );
+  const mailtoHref = `mailto:?subject=${emailSubject}&body=${emailBody}`;
 
-  const perMonthFallback = perMonthLow ?? perMonthHigh;
-  const finalPerMonthLow = perMonthLow ?? perMonthFallback;
-  const finalPerMonthHigh = perMonthHigh ?? perMonthFallback;
-
-  const perYearFallback = perYearLow ?? perYearHigh;
-  const finalPerYearLow =
-    perYearLow ?? perYearFallback ?? (finalPerMonthLow !== null ? finalPerMonthLow * 12 : null);
-  const finalPerYearHigh =
-    perYearHigh ?? perYearFallback ?? (finalPerMonthHigh !== null ? finalPerMonthHigh * 12 : null);
-
-  const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
-  const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
-
-  const competitorRows = competitors.slice(0, 10).map((c: any) => {
-    const name = safeString(c?.name, "Unknown");
-    const url = safeString(c?.url, "");
-    const tripFee = c?.trip_fee ?? null;
-    const membership = c?.membership_offer ?? null;
-    const warranty = c?.warranty_offer ?? null;
-    return { name, url, tripFee, membership, warranty };
-  });
-
-  const proofLine = `Built from ${competitors.length || "—"} local competitors and ${evidence.length || "—"} proof snippets.`;
-
-  const meaningLine =
-    marketPosition
-      ? `Right now you look like a “${marketPosition}” option. That usually means you get price-shopped and your jobs stay small.`
-      : `This market rewards businesses that charge properly and sell a stronger offer (fees, plans, and warranty).`;
-
-  const verdictLine =
-    quickVerdict ||
-    "You’re leaving money on the table because your offer is weaker than what most competitors show publicly.";
+  // Better default copy if missing
+  const websiteUrl = safeString(reportRow.case?.websiteUrl, "your website");
+  const location = safeString(reportRow.case?.location, "");
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      {/* Header */}
-      <div className="sticky top-0 z-20 border-b bg-white/85 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-xs text-zinc-500">Profit Leak Attorney</div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <div className="text-base font-semibold text-zinc-900">Audit Report</div>
-              <span className="text-zinc-300">•</span>
-              <div className="text-sm text-zinc-600 truncate">
-                {shortHost(reportRow.case.websiteUrl)} • {reportRow.case.location}
+    <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900">
+      {/* Navbar */}
+      <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur-md">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-900 text-white font-bold tracking-tighter">
+                PA.
+              </div>
+              <div className="hidden sm:block">
+                <h1 className="text-sm font-bold text-zinc-900">ProfitAudit</h1>
+                <p className="text-[11px] text-zinc-500 -mt-0.5">High-end offer + pricing audit</p>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-3">
-            <div className={`hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${confBadge.cls}`}>
-              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-              Confidence: {confBadge.text}
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:block">
+                <ConfidenceBadge level={confidence} />
+              </div>
+              <div className="text-xs text-zinc-400">
+                Case: {shortHost(websiteUrl)} {location ? `• ${location}` : ""}
+              </div>
+
+              <Link
+                href="/new"
+                className="ml-2 inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800"
+              >
+                Run Another Audit
+              </Link>
             </div>
-
-            <Link
-              href="/new"
-              className="inline-flex items-center justify-center rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
-            >
-              Run Another Audit
-            </Link>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="mx-auto max-w-6xl px-6 py-10 space-y-10">
-        {/* HERO BENTO */}
-        <div className="grid grid-cols-12 gap-5">
-          {/* Main money card */}
-          <Card className="col-span-12 lg:col-span-8 p-7 md:p-8">
-            <div className="flex items-start justify-between gap-6">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Summary</div>
+      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        {/* HERO */}
+        <div className="mb-14 text-center max-w-4xl mx-auto">
+          <div className="inline-block rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-100 mb-6 tracking-wide">
+            AUDIT COMPLETE FOR {shortHost(websiteUrl).toUpperCase()}
+          </div>
 
-                <div className="mt-3">
-                  <div className="text-sm text-zinc-600">Money you’re losing (estimate)</div>
-                  <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-2">
-                    <div className="text-4xl md:text-5xl font-semibold tracking-tight text-zinc-900">
-                      {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
-                    </div>
-                    <div className="text-base font-semibold text-zinc-600">/ month</div>
-                  </div>
+          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-zinc-900 leading-tight">
+            You are leaking{" "}
+            <span className="bg-yellow-200 px-2">
+              {moneyRange(leakNums.finalPerYearLow, leakNums.finalPerYearHigh)}
+            </span>{" "}
+            every single year.
+          </h1>
 
-                  <div className="mt-2 text-sm md:text-base text-zinc-700">
-                    That’s about{" "}
-                    <span className="font-semibold">{moneyRange(finalPerYearLow, finalPerYearHigh)}</span>{" "}
-                    per year in missed profit compared to what competitors already charge and offer.
-                  </div>
-                </div>
-              </div>
-
-              <div className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${confBadge.cls}`}>
-                Confidence: {confBadge.text}
-              </div>
-            </div>
-
-            {/* Support bento inside */}
-            <div className="mt-6 grid grid-cols-12 gap-4">
-              <div className="col-span-12 md:col-span-5 rounded-xl bg-zinc-50 ring-1 ring-zinc-200 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">What this means</div>
-                <div className="mt-2 text-sm leading-relaxed text-zinc-800">{meaningLine}</div>
-                {marketPosition ? (
-                  <div className="mt-3 inline-flex items-center rounded-full bg-white ring-1 ring-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-800">
-                    Current label: {marketPosition}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="col-span-12 md:col-span-4 rounded-xl bg-zinc-50 ring-1 ring-zinc-200 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Cost of waiting</div>
-                <div className="mt-2 text-sm text-zinc-800">
-                  Roughly <span className="font-semibold">{moneyRange(perWeekLow, perWeekHigh)}</span> lost per week.
-                </div>
-                <div className="mt-2 text-xs text-zinc-500">Simple estimate to force fast decisions.</div>
-              </div>
-
-              <div className="col-span-12 md:col-span-3 rounded-xl bg-zinc-50 ring-1 ring-zinc-200 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Proof</div>
-                <div className="mt-2 text-sm text-zinc-800">{proofLine}</div>
-                <div className="mt-2 flex gap-2">
-                  <div className="rounded-lg bg-white ring-1 ring-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-900">
-                    Snippets: {evidence.length || 0}
-                  </div>
-                  <div className="rounded-lg bg-white ring-1 ring-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-900">
-                    Competitors: {competitors.length || 0}
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-span-12 rounded-xl ring-1 ring-zinc-200 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Bottom line</div>
-                <div className="mt-2 text-sm leading-relaxed text-zinc-900">{verdictLine}</div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Action card */}
-          <Card className="col-span-12 lg:col-span-4 overflow-hidden">
-            <div className="bg-zinc-900 p-7 text-white">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                Do this first (72 hours)
-              </div>
-              <div className="mt-2 text-lg font-semibold tracking-tight">
-                Quick wins that pay you back
-              </div>
-
-              <ol className="mt-5 space-y-3 list-decimal pl-5 text-sm text-zinc-100">
-                {do72.map((x, i) => (
-                  <li key={i} className="leading-relaxed">{x}</li>
-                ))}
-              </ol>
-
-              <div className="mt-6 rounded-xl bg-white/10 p-4">
-                <div className="text-xs font-semibold text-zinc-200">One rule</div>
-                <div className="mt-1 text-xs leading-relaxed text-zinc-200">
-                  Don’t “improve everything.” Fix #1 first. Then #2. Then #3.
-                </div>
-              </div>
-
-              <div className="mt-6 text-xs text-zinc-300">
-                If you’re serious, do this before you read the rest.
-              </div>
-            </div>
-          </Card>
+          <p className="mt-6 text-xl text-zinc-600 max-w-2xl mx-auto leading-relaxed">
+            This is profit slipping away because your pricing and offer look weaker than what customers see from your
+            local competitors.
+          </p>
         </div>
 
-        {/* LEAKS SECTION */}
-        <Card className="p-7 md:p-8">
-          <SectionTitle
-            kicker="Priority list"
-            title="What’s causing the leak (ranked)"
-            subtitle="Fix these in order. This is where the money is."
-          />
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* LEFT */}
+          <div className="lg:col-span-8 space-y-12">
+            {/* Leak Summary */}
+            <section>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Card className="bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 flex flex-col justify-between shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
+                  <div className="absolute top-0 right-0 -mt-8 -mr-8 h-32 w-32 rounded-full bg-white/10 blur-3xl"></div>
 
-          {topLeaks.length ? (
-            <div className="mt-6 grid grid-cols-12 gap-4">
-              {topLeaks.slice(0, 3).map((l: any, idx: number) => {
-                const impact = allocateLeakImpact(finalPerMonthLow, finalPerMonthHigh, idx);
-                return (
-                  <div key={idx} className="col-span-12 md:col-span-4 rounded-2xl bg-zinc-50 ring-1 ring-zinc-200 p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="inline-flex items-center gap-2">
-                        <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-semibold text-white">
-                          #{idx + 1}
-                        </span>
-                        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Leak</span>
+                  <div>
+                    <div className="flex items-center gap-2 text-rose-100 mb-3">
+                      <div className="rounded-full bg-white/20 p-1.5">
+                        <LucideAlertOctagon className="w-4 h-4 text-white" />
                       </div>
-                      <div className="rounded-full bg-white ring-1 ring-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-900">
-                        Est: {moneyRange(impact.lo, impact.hi)}/mo
-                      </div>
+                      <span className="text-xs font-bold uppercase tracking-widest">Total Annual Leak</span>
                     </div>
-
-                    <div className="mt-3 text-base font-semibold text-zinc-900">
-                      {safeString(l?.title, "Untitled")}
-                    </div>
-
-                    <div className="mt-3 text-sm text-zinc-700">
-                      <span className="font-semibold text-zinc-900">Why it hurts:</span>{" "}
-                      {safeString(l?.why_it_matters, "—")}
-                    </div>
-
-                    <div className="mt-3 text-sm text-zinc-700">
-                      <span className="font-semibold text-zinc-900">What competitors do:</span>{" "}
-                      {safeString(l?.market_contrast, "—")}
-                    </div>
-
-                    <div className="mt-4 text-xs text-zinc-500">
-                      Planning split: {Math.round(impact.w * 100)}% (for focus).
+                    <div className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white leading-none shadow-sm">
+                      {moneyRange(leakNums.finalPerYearLow, leakNums.finalPerYearHigh)}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="mt-4 text-sm text-zinc-600">No ranked leaks were generated for this run.</div>
-          )}
-        </Card>
 
-        {/* OFFER FIXES */}
-        <Card className="p-7 md:p-8">
-          <SectionTitle
-            kicker="Fix the offer"
-            title="What to add (so you can charge more)"
-            subtitle="This is how competitors make the same customer worth more money."
-          />
-
-          {offers.length ? (
-            <div className="mt-6 grid grid-cols-12 gap-4">
-              {offers.slice(0, 4).map((o: any, i: number) => (
-                <div key={i} className="col-span-12 md:col-span-6 rounded-2xl bg-zinc-50 ring-1 ring-zinc-200 p-6">
-                  <div className="text-base font-semibold text-zinc-900">{safeString(o?.title, "Untitled")}</div>
-                  <div className="mt-2 text-sm leading-relaxed text-zinc-700">{safeString(o?.content, "")}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-4 text-sm text-zinc-600">No offer upgrades were generated.</div>
-          )}
-        </Card>
-
-        {/* COMPETITOR TABLE */}
-        <Card className="p-7 md:p-8">
-          <SectionTitle
-            kicker="Local comparison"
-            title="What competitors show publicly"
-            subtitle="Quick view. Proof is in the locker below."
-          />
-
-          <div className="mt-6 overflow-hidden rounded-2xl ring-1 ring-zinc-200">
-            <div className="grid grid-cols-12 bg-zinc-100 px-4 py-3 text-xs font-semibold text-zinc-600">
-              <div className="col-span-4">Competitor</div>
-              <div className="col-span-2">Trip fee</div>
-              <div className="col-span-3">Membership</div>
-              <div className="col-span-3">Warranty</div>
-            </div>
-
-            {competitorRows.length ? (
-              competitorRows.map((r, i) => (
-                <div key={i} className="grid grid-cols-12 px-4 py-4 text-sm border-t border-zinc-200">
-                  <div className="col-span-4">
-                    <div className="font-semibold text-zinc-900">{r.name}</div>
-                    {r.url ? (
-                      <a className="text-xs text-zinc-500 hover:underline" href={r.url} target="_blank" rel="noreferrer">
-                        {shortHost(r.url)}
-                      </a>
-                    ) : null}
-                  </div>
-                  <div className="col-span-2 text-zinc-800">{r.tripFee ? safeString(r.tripFee) : "—"}</div>
-                  <div className="col-span-3 text-zinc-800">{r.membership ? safeString(r.membership) : "—"}</div>
-                  <div className="col-span-3 text-zinc-800">{r.warranty ? safeString(r.warranty) : "—"}</div>
-                </div>
-              ))
-            ) : (
-              <div className="px-4 py-4 text-sm text-zinc-600">No competitors were extracted for this run.</div>
-            )}
-          </div>
-        </Card>
-
-        {/* PROOF LOCKER */}
-        <Card className="p-7 md:p-8">
-          <div className="flex items-start justify-between gap-6">
-            <SectionTitle
-              kicker="Proof locker"
-              title="Proof (open if you want to verify)"
-              subtitle="Real snippets pulled from competitor pages (pricing, memberships, warranties, etc)."
-            />
-
-            <div className="hidden sm:flex items-center gap-2">
-              <div className="rounded-full bg-zinc-50 ring-1 ring-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-900">
-                Snippets: {evidence.length || 0}
-              </div>
-              <div className="rounded-full bg-zinc-50 ring-1 ring-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-900">
-                Competitors: {competitors.length || 0}
-              </div>
-            </div>
-          </div>
-
-          <details className="mt-6 rounded-2xl bg-zinc-50 ring-1 ring-zinc-200 p-5">
-            <summary className="cursor-pointer text-sm font-semibold text-zinc-900">
-              Open proof locker ({evidence.length})
-            </summary>
-
-            <div className="mt-4 space-y-3">
-              {evidence.length ? (
-                evidence.map((e: any, idx: number) => (
-                  <details key={idx} className="rounded-xl bg-white ring-1 ring-zinc-200 p-4">
-                    <summary className="cursor-pointer flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-zinc-500">
-                          {evidenceTypeLabel(safeString(e?.type))} •{" "}
-                          <span className="font-normal">{shortHost(safeString(e?.source_url, "")).slice(0, 80)}</span>
-                        </div>
-                        <div className="mt-1 text-sm text-zinc-900 truncate">
-                          {safeString(e?.snippet, "—").replace(/\s+/g, " ").slice(0, 140)}
-                          {safeString(e?.snippet, "").length > 140 ? "…" : ""}
-                        </div>
-                      </div>
-                      <span className="text-xs text-zinc-500">Expand</span>
-                    </summary>
-
-                    <div className="mt-3 text-sm leading-relaxed text-zinc-800 whitespace-pre-wrap">
-                      {safeString(e?.snippet, "—")}
+                  <div className="mt-10 relative z-10">
+                    <div className="flex justify-between items-end text-xs font-medium text-rose-100 mb-2">
+                      <span>Pricing + Offer Efficiency</span>
+                      <span className="text-white font-bold">GAP EXISTS</span>
                     </div>
 
-                    {e?.source_url ? (
-                      <a
-                        href={safeString(e?.source_url)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-3 inline-block text-sm font-semibold text-zinc-900 hover:underline"
+                    <div className="relative h-4 w-full bg-black/30 rounded-full overflow-hidden backdrop-blur-sm ring-1 ring-white/10">
+                      <div className="absolute left-0 top-0 h-full bg-white/80 w-[85%] rounded-l-full"></div>
+                      <div className="absolute right-0 top-0 h-full bg-red-600 w-[15%] rounded-r-full"></div>
+                    </div>
+
+                    <p className="mt-3 text-sm font-medium text-rose-50 leading-snug flex items-start gap-2 opacity-90">
+                      <LucideTrendingDown className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>Your competitors are capturing this money. You are not.</span>
+                    </p>
+                  </div>
+                </Card>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <Card>
+                    <div className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Monthly Cash Impact</div>
+                    <div className="text-2xl font-bold text-zinc-900">
+                      {moneyRange(leakNums.finalPerMonthLow, leakNums.finalPerMonthHigh)}
+                      <span className="text-sm font-medium text-zinc-400 ml-1">/mo</span>
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-1">Money you should be keeping each month.</p>
+                  </Card>
+
+                  <Card>
+                    <div className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Market Perception</div>
+                    <div className="text-xl font-bold text-zinc-900">{marketPosition || "Unknown"}</div>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      If you look “cheap”, you get price-shopped. If you look “safe”, you get chosen.
+                    </p>
+                  </Card>
+                </div>
+              </div>
+            </section>
+
+            {/* Top Leaks */}
+            <section>
+              <SectionHeader
+                title="Where is the money going?"
+                subtitle="We found these 3 holes. Fix #1 first."
+              />
+
+              <div className="space-y-6">
+                {topLeaks.length > 0 ? (
+                  topLeaks.slice(0, 3).map((leak: any, idx: number) => {
+                    const w = [0.45, 0.35, 0.2][idx] || 0.1;
+                    const impactVal =
+                      leakNums.finalPerMonthLow !== null ? Math.round(leakNums.finalPerMonthLow * w) : null;
+
+                    return (
+                      <div
+                        key={idx}
+                        className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
                       >
-                        Open source →
-                      </a>
-                    ) : null}
-                  </details>
-                ))
-              ) : (
-                <div className="text-sm text-zinc-600">No evidence was extracted for this run.</div>
-              )}
-            </div>
-          </details>
-        </Card>
+                        <div className="flex items-center gap-4 bg-zinc-50/50 p-6 border-b border-zinc-100">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-zinc-200 text-lg font-bold text-zinc-900 shadow-sm">
+                            #{idx + 1}
+                          </div>
+                          <div>
+                            <h4 className="text-lg font-bold text-zinc-900">
+                              {safeString(leak?.title, "Untitled Issue")}
+                            </h4>
+                            <div className="flex sm:hidden mt-2">
+                              <ImpactBadge value={moneyCompact(impactVal)} />
+                            </div>
+                          </div>
+                          <div className="ml-auto hidden sm:block">
+                            <ImpactBadge value={moneyCompact(impactVal)} />
+                          </div>
+                        </div>
 
-        {/* NEXT 7 DAYS */}
-        <div className="rounded-2xl bg-zinc-900 p-7 md:p-8 text-white shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">Next 7 days</div>
-          <h2 className="mt-2 text-xl md:text-2xl font-semibold tracking-tight">Your simple plan</h2>
-          <div className="mt-1 text-sm text-zinc-300">
-            Do this in order. Don’t add extra steps. Get the money back first.
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div>
+                            <p className="flex items-center gap-2 text-xs font-bold uppercase text-rose-600 mb-2">
+                              <LucideAlertTriangle className="w-3 h-3" /> The Problem
+                            </p>
+                            <p className="text-sm text-zinc-800 leading-relaxed font-medium">
+                              {safeString(leak?.why_it_matters)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="flex items-center gap-2 text-xs font-bold uppercase text-emerald-600 mb-2">
+                              <LucideCheck className="w-3 h-3" /> What Competitors Do
+                            </p>
+                            <p className="text-sm text-zinc-600 leading-relaxed">
+                              {safeString(leak?.market_contrast)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-6 text-center text-sm text-zinc-500 border border-dashed border-zinc-300 rounded-xl">
+                    No leaks generated for this run.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Competitor Matrix */}
+            <section>
+              <SectionHeader
+                title="The Competitor Landscape"
+                subtitle="This is what customers see and compare you to."
+              />
+
+              <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm whitespace-nowrap">
+                    <thead className="bg-zinc-50/80 text-xs uppercase font-semibold text-zinc-500">
+                      <tr>
+                        <th className="px-6 py-4">Business</th>
+                        <th className="px-6 py-4">Trip Fee</th>
+                        <th className="px-6 py-4">Membership</th>
+                        <th className="px-6 py-4">Warranty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {competitors.slice(0, 8).map((c: any, i: number) => (
+                        <tr key={i} className="hover:bg-zinc-50/50 transition">
+                          <td className="px-6 py-4 font-medium text-zinc-900">
+                            {c?.url ? (
+                              <a
+                                href={c.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-1 hover:text-blue-600"
+                              >
+                                {safeString(c?.name, "Unknown")}{" "}
+                                <LucideExternalLink className="w-3 h-3 text-zinc-400" />
+                              </a>
+                            ) : (
+                              safeString(c?.name, "Unknown")
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-zinc-600 font-medium">
+                            {safeString(c?.trip_fee, "—")}
+                          </td>
+                          <td className="px-6 py-4 text-zinc-600">
+                            {safeString(c?.membership_offer, "—")}
+                          </td>
+                          <td className="px-6 py-4 text-zinc-600">
+                            {safeString(c?.warranty_offer, "—")}
+                          </td>
+                        </tr>
+                      ))}
+                      {!competitors.length ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-zinc-500" colSpan={4}>
+                            No competitors extracted for this run.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            {/* Evidence Locker */}
+            <section>
+              <SectionHeader
+                title="Verified Source Data"
+                subtitle={`We didn’t guess. We pulled ${evidence.length} proof snippets from competitor websites to build this report.`}
+              />
+
+              <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+                <div className="bg-zinc-50 px-6 py-3 border-b border-zinc-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500">
+                    <LucideSearch className="w-3 h-3" /> Evidence Log
+                  </div>
+                  <div className="text-xs text-zinc-400">Pulled on {new Date().toLocaleDateString()}</div>
+                </div>
+
+                <div className="divide-y divide-zinc-100">
+                  {evidence.length > 0 ? (
+                    evidence.map((e: any, i: number) => {
+                      const label = normalizeEvidenceType(safeString(e?.type, ""));
+                      const competitorName = inferEvidenceCompetitorName(e, competitors);
+                      const src = safeString(e?.source_url, "");
+
+                      return (
+                        <div
+                          key={i}
+                          className="p-5 hover:bg-zinc-50/50 transition flex flex-col sm:flex-row gap-4 sm:items-start"
+                        >
+                          <div className="shrink-0">
+                            <span className="inline-flex items-center rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10 w-24 justify-center">
+                              {label}
+                            </span>
+                          </div>
+
+                          <div className="grow">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-bold text-zinc-900">{competitorName}</span>
+                              <span className="text-xs text-zinc-400">•</span>
+                              {src ? (
+                                <a
+                                  href={src}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                >
+                                  Verify Source <LucideExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                              ) : (
+                                <span className="text-xs text-zinc-400">No source URL</span>
+                              )}
+                            </div>
+
+                            <p className="text-sm text-zinc-600 font-mono bg-zinc-50 p-2 rounded border border-zinc-100 mt-2">
+                              “{safeString(e?.snippet, "—")}”
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="p-8 text-center text-sm text-zinc-500">No raw evidence logs available.</div>
+                  )}
+                </div>
+              </div>
+            </section>
           </div>
 
-          <ol className="mt-5 space-y-2 list-decimal pl-5 text-sm text-zinc-100">
-            {safeArray<string>(data?.next_7_days).slice(0, 7).map((x, i) => (
-              <li key={i} className="leading-relaxed">{x}</li>
-            ))}
-          </ol>
+          {/* RIGHT (Sticky Plan) */}
+          <div className="lg:col-span-4">
+            <div className="sticky top-24 space-y-6">
+              <div className="rounded-xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-blue-900">
+                <div className="mb-4 flex items-center gap-3 border-b border-white/10 pb-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white font-bold">
+                    <LucideFileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold tracking-wide text-lg">Your Plan</h3>
+                    <p className="text-xs text-blue-200">72-Hour Turnaround</p>
+                  </div>
+                </div>
 
-          {!safeArray<string>(data?.next_7_days).length ? (
-            <div className="mt-3 text-sm text-zinc-300">No plan was generated for this run.</div>
-          ) : null}
+                <p className="mb-6 text-sm text-blue-100 leading-relaxed">
+                  Stop the bleeding first. Do these 3 things now to recover{" "}
+                  <span className="font-bold text-white border-b border-white/30">
+                    ~{moneyCompact(leakNums.finalPerMonthLow)}/mo
+                  </span>
+                  .
+                </p>
+
+                <ul className="space-y-4">
+                  {doFirst.length > 0 ? (
+                    doFirst.map((action: string, i: number) => (
+                      <li key={i} className="flex gap-3 items-start">
+                        <div className="mt-0.5 shrink-0 text-blue-300">
+                          <div className="h-5 w-5 rounded-full border border-blue-400 flex items-center justify-center">
+                            <span className="text-[10px] font-bold">{i + 1}</span>
+                          </div>
+                        </div>
+                        <span className="text-sm font-medium leading-relaxed text-white">{action}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="text-sm text-blue-200">No urgent actions generated.</li>
+                  )}
+                </ul>
+
+                <div className="mt-8">
+                  <a
+                    href={mailtoHref}
+                    className="block w-full rounded-lg bg-white py-3 text-center text-sm font-bold text-blue-900 hover:bg-blue-50 transition shadow-sm"
+                  >
+                    Send This Plan To My Email
+                  </a>
+                  <div className="mt-2 text-[11px] text-blue-200">
+                    (Opens your email app. No login needed.)
+                  </div>
+                </div>
+              </div>
+
+              <Card className="bg-white">
+                <h4 className="font-bold text-zinc-900 text-sm flex items-center gap-2 mb-2">Why trust this?</h4>
+                <p className="text-xs leading-relaxed text-zinc-500">
+                  We pulled proof from {competitorCount} direct competitors in your area. This report is built from what
+                  they show publicly (fees, plans, warranties). It’s not “AI guessing.”
+                </p>
+              </Card>
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
