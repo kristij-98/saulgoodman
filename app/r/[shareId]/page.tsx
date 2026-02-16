@@ -1,23 +1,22 @@
 // app/r/[shareId]/page.tsx
-import React from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-
 import {
-  LucideAlertTriangle,
-  LucideCheck,
-  LucideExternalLink,
-  LucideSearch,
-  LucideFileText,
-  LucideTrendingDown,
-  LucideAlertOctagon,
+  AlertOctagon,
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  FileText,
+  Search,
+  TrendingDown,
 } from "lucide-react";
 
 type ReportAny = any;
 
-// -------------------- Helpers --------------------
-
+// -----------------------------
+// Helpers (safe + formatting)
+// -----------------------------
 function safeArray<T = any>(v: any): T[] {
   return Array.isArray(v) ? v : [];
 }
@@ -36,17 +35,16 @@ function num(v: any): number | null {
   return null;
 }
 
-// Format: $1,200
 function money(n: number | null): string {
   if (n === null) return "—";
   return `$${Math.round(n).toLocaleString()}`;
 }
 
-// Format: $1.2k (compact)
 function moneyCompact(n: number | null): string {
   if (n === null) return "—";
-  if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
   return `$${Math.round(n).toLocaleString()}`;
 }
 
@@ -64,154 +62,59 @@ function shortHost(url: string) {
     .replace(/^www\./, "");
 }
 
-function normalizeEvidenceType(t: string) {
-  const x = (t || "").toLowerCase();
-  if (x === "pricing") return "Pricing";
-  if (x === "service") return "Service";
-  if (x === "reputation") return "Reviews";
-  if (x === "guarantee") return "Warranty";
-  if (x === "warranty") return "Warranty";
-  if (x === "membership") return "Membership";
-  return t ? t : "Evidence";
-}
-
-function pickTopActions(report: ReportAny): string[] {
-  const next = safeArray<string>(report?.next_7_days).filter(Boolean);
-  if (next.length) return next;
-
-  const offers = safeArray(report?.offer_rebuild)
-    .map((o: any) => safeString(o?.title).trim())
-    .filter(Boolean);
-
-  if (offers.length) return offers.map((t) => `Add: ${t}`);
-
-  return [
-    "Set a standard trip/dispatch fee (and waive it for members).",
-    "Add a membership plan so you get recurring money each month.",
-    "Put simple pricing ranges on your website (so people trust you faster).",
-  ];
-}
-
-function getLeakNumbers(data: ReportAny) {
-  // Supports multiple shapes so UI won’t break as you evolve scoring.
-  const leakSources = [
-    data?.benchmark_data?.leaks,
-    data?.benchmark_data?.delta?.leaks,
-    data?.delta?.leaks,
-    data?.benchmark_data?.leak_estimate,
-    data?.delta?.leak_estimate,
-    data?.benchmark_data?.upside, // sometimes devs put numbers here; won’t crash
-  ].filter(Boolean);
-
-  function pick(keys: string[]) {
-    for (const obj of leakSources) {
-      for (const k of keys) {
-        const n = num((obj as any)?.[k]);
-        if (n !== null) return n;
-      }
-    }
-    return null;
+function confidenceMeta(level: string) {
+  const c = (level || "").toUpperCase();
+  if (c === "HIGH") {
+    return {
+      label: "High Confidence",
+      cls: "bg-emerald-50 text-emerald-700 ring-emerald-200/60",
+      dot: "bg-emerald-600",
+      pulse: true,
+    };
   }
-
-  const perMonthLow = pick(["per_month_low", "monthly_low", "month_low"]);
-  const perMonthHigh = pick(["per_month_high", "monthly_high", "month_high"]);
-  const perYearLow = pick(["per_year_low", "yearly_low", "year_low"]);
-  const perYearHigh = pick(["per_year_high", "yearly_high", "year_high"]);
-
-  const finalPerMonthLow = perMonthLow ?? perMonthHigh;
-  const finalPerMonthHigh = perMonthHigh ?? perMonthLow;
-
-  const finalPerYearLow = perYearLow ?? (finalPerMonthLow !== null ? finalPerMonthLow * 12 : null);
-  const finalPerYearHigh = perYearHigh ?? (finalPerMonthHigh !== null ? finalPerMonthHigh * 12 : null);
-
+  if (c === "MED") {
+    return {
+      label: "Medium Confidence",
+      cls: "bg-amber-50 text-amber-700 ring-amber-200/60",
+      dot: "bg-amber-600",
+      pulse: false,
+    };
+  }
   return {
-    perMonthLow,
-    perMonthHigh,
-    perYearLow,
-    perYearHigh,
-    finalPerMonthLow,
-    finalPerMonthHigh,
-    finalPerYearLow,
-    finalPerYearHigh,
+    label: "Low Confidence",
+    cls: "bg-zinc-100 text-zinc-600 ring-zinc-200",
+    dot: "bg-zinc-500",
+    pulse: false,
   };
 }
 
-// Attempt to display competitor name for evidence entries
-function inferEvidenceCompetitorName(e: any, competitors: any[]) {
-  // If your backend ever adds competitor, use it
-  const direct = safeString(e?.competitor, "");
-  if (direct) return direct;
-
-  const url = safeString(e?.source_url, "");
-  const host = shortHost(url);
-  if (!host) return "Competitor";
-
-  // Match host against competitor url host
-  const match = competitors.find((c: any) => {
-    const cu = safeString(c?.url, "");
-    if (!cu) return false;
-    return shortHost(cu) && host.includes(shortHost(cu));
-  });
-
-  return safeString(match?.name, host);
+function evidenceTypeLabel(t: string) {
+  const x = (t || "").toLowerCase();
+  if (x === "pricing") return "Pricing";
+  if (x === "service") return "Service";
+  if (x === "reputation") return "Reputation";
+  if (x === "guarantee") return "Warranty/Guarantee";
+  return "Other";
 }
 
-// -------------------- Components --------------------
-
-function ConfidenceBadge({ level }: { level: string }) {
-  const c = (level || "").toUpperCase();
-  let colors = "bg-zinc-100 text-zinc-600 ring-zinc-200";
-  let label = "Low Confidence";
-
-  if (c === "HIGH") {
-    colors = "bg-emerald-50 text-emerald-700 ring-emerald-200/50";
-    label = "High Confidence";
-  } else if (c === "MED") {
-    colors = "bg-amber-50 text-amber-700 ring-amber-200/50";
-    label = "Medium Confidence";
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium tracking-wide ring-1 ring-inset ${colors}`}
-    >
-      <span className="relative flex h-1.5 w-1.5">
-        <span
-          className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
-            c === "HIGH" ? "bg-emerald-500 animate-pulse" : "bg-current"
-          }`}
-        ></span>
-        <span
-          className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-            c === "HIGH" ? "bg-emerald-600" : "bg-current"
-          }`}
-        ></span>
-      </span>
-      {label}
-    </span>
-  );
+// Honest allocation for “impact badge” (NOT pretending precision)
+function leakWeight(idx: number) {
+  const weights = [0.45, 0.35, 0.2];
+  return weights[idx] ?? 0.15;
 }
 
-function SectionHeader({
-  title,
-  subtitle,
-  action,
-}: {
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h3 className="text-lg font-bold text-zinc-900">{title}</h3>
-        {subtitle && <p className="text-sm text-zinc-500 max-w-2xl">{subtitle}</p>}
-      </div>
-      {action && <div className="mt-2 sm:mt-0">{action}</div>}
-    </div>
-  );
+// Try to guess competitor name for a piece of evidence (best-effort, safe)
+function inferCompetitorNameFromUrl(sourceUrl: string, competitors: any[]) {
+  const host = shortHost(sourceUrl);
+  if (!host) return "Source";
+  const match = competitors.find((c) => shortHost(safeString(c?.url, "")) && host.includes(shortHost(safeString(c?.url, ""))));
+  if (match?.name) return safeString(match.name, "Source");
+  return host;
 }
 
+// -----------------------------
+// UI atoms
+// -----------------------------
 function Card({
   children,
   className = "",
@@ -222,8 +125,28 @@ function Card({
   noPad?: boolean;
 }) {
   return (
-    <div className={`overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm ${className}`}>
-      <div className={noPad ? "" : "p-5 md:p-6"}>{children}</div>
+    <div className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm ${className}`}>
+      <div className={noPad ? "" : "p-5 sm:p-6"}>{children}</div>
+    </div>
+  );
+}
+
+function SectionHeader({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h3 className="text-xl font-extrabold tracking-tight text-zinc-900">{title}</h3>
+        {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-relaxed text-zinc-500">{subtitle}</p> : null}
+      </div>
+      {right ? <div className="sm:pb-1">{right}</div> : null}
     </div>
   );
 }
@@ -236,8 +159,22 @@ function ImpactBadge({ value }: { value: string }) {
   );
 }
 
-// -------------------- Page --------------------
+function ConfidenceBadge({ level }: { level: string }) {
+  const m = confidenceMeta(level);
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px] font-semibold tracking-wide ring-1 ring-inset ${m.cls}`}>
+      <span className="relative flex h-2 w-2">
+        {m.pulse ? <span className={`absolute inline-flex h-full w-full rounded-full ${m.dot} opacity-30 animate-ping`} /> : null}
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${m.dot}`} />
+      </span>
+      {m.label}
+    </span>
+  );
+}
 
+// -----------------------------
+// Page
+// -----------------------------
 export default async function ReportPage({ params }: { params: { shareId: string } }) {
   const shareId = params.shareId;
 
@@ -250,60 +187,80 @@ export default async function ReportPage({ params }: { params: { shareId: string
 
   const data = (reportRow.content ?? {}) as ReportAny;
 
-  const meta = data?.meta ?? {};
-  const confidence = safeString(meta?.confidence, "LOW");
+  const confidence = safeString(data?.meta?.confidence, "LOW");
+  const marketPosition = safeString(data?.market_position, "");
+  const quickVerdict = safeString(data?.quick_verdict, "");
 
-  const topLeaks = safeArray(data?.top_leaks_ranked);
-  const offers = safeArray(data?.offer_rebuild);
   const competitors = safeArray(data?.competitors);
   const evidence = safeArray(data?.evidence_drawer);
+  const topLeaks = safeArray(data?.top_leaks_ranked);
+  const offers = safeArray(data?.offer_rebuild);
+  const nextActions = safeArray<string>(data?.next_7_days).filter(Boolean);
 
-  const marketPosition = safeString(data?.market_position, "");
+  const doFirst = nextActions.slice(0, 3);
+  const doLater = nextActions.slice(3, 10);
 
-  const leakNums = getLeakNumbers(data);
+  const leakObj = data?.benchmark_data?.leaks ?? {};
+  const perMonthLow = num(leakObj?.per_month_low ?? leakObj?.monthly_low);
+  const perMonthHigh = num(leakObj?.per_month_high ?? leakObj?.monthly_high);
 
-  const nextActionsAll = pickTopActions(data).filter(Boolean);
-  const doFirst = nextActionsAll.slice(0, 3);
+  // Derive yearly if missing
+  const perYearLow = num(leakObj?.per_year_low ?? leakObj?.yearly_low) ?? (perMonthLow !== null ? perMonthLow * 12 : null);
+  const perYearHigh = num(leakObj?.per_year_high ?? leakObj?.yearly_high) ?? (perMonthHigh !== null ? perMonthHigh * 12 : null);
+
+  const finalPerMonthLow = perMonthLow ?? perMonthHigh;
+  const finalPerMonthHigh = perMonthHigh ?? perMonthLow;
+
   const competitorCount = competitors.length;
+  const proofCount = evidence.length;
 
-  // Email button: mailto (no backend needed, no client JS needed)
-  const emailSubject = encodeURIComponent("My ProfitAudit Action Plan");
-  const emailBody = encodeURIComponent(
-    `Here is the 72-hour plan:\n\n${doFirst.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\nReport link: ${shareId}`
-  );
-  const mailtoHref = `mailto:?subject=${emailSubject}&body=${emailBody}`;
+  // “Cost of delay” (simple framing)
+  const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
+  const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
 
-  // Better default copy if missing
-  const websiteUrl = safeString(reportRow.case?.websiteUrl, "your website");
-  const location = safeString(reportRow.case?.location, "");
+  const headerCaseHost = shortHost(reportRow.case.websiteUrl);
+  const headerLocation = safeString(reportRow.case.location, "");
 
+  const heroSubtitle =
+    "This is profit slipping away because your pricing and offer look weaker than what customers see from local competitors.";
+
+  const perceptionLine = marketPosition
+    ? marketPosition
+    : "Unclear positioning (customers can’t quickly tell why you cost more).";
+
+  // -----------------------------
+  // Render
+  // -----------------------------
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900">
-      {/* Navbar */}
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      {/* Navbar (wide + responsive) */}
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-900 text-white font-bold tracking-tighter">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-10">
+          <div className="flex h-16 items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-900 text-white font-extrabold tracking-tight">
                 PA.
               </div>
-              <div className="hidden sm:block">
-                <h1 className="text-sm font-bold text-zinc-900">ProfitAudit</h1>
-                <p className="text-[11px] text-zinc-500 -mt-0.5">High-end offer + pricing audit</p>
+              <div className="leading-tight">
+                <div className="text-sm font-extrabold">ProfitAudit</div>
+                <div className="hidden sm:block text-xs text-zinc-500">High-end offer + pricing audit</div>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden sm:block">
+              <div className="hidden md:block">
                 <ConfidenceBadge level={confidence} />
               </div>
-              <div className="text-xs text-zinc-400">
-                Case: {shortHost(websiteUrl)} {location ? `• ${location}` : ""}
+
+              <div className="hidden sm:block text-xs text-zinc-500">
+                Case: <span className="font-semibold text-zinc-700">{headerCaseHost || "—"}</span>
+                {headerLocation ? <span className="text-zinc-300"> • </span> : null}
+                {headerLocation ? <span className="font-semibold text-zinc-700">{headerLocation}</span> : null}
               </div>
 
               <Link
                 href="/new"
-                className="ml-2 inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800"
+                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
               >
                 Run Another Audit
               </Link>
@@ -312,139 +269,158 @@ export default async function ReportPage({ params }: { params: { shareId: string
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        {/* HERO */}
-        <div className="mb-14 text-center max-w-4xl mx-auto">
-          <div className="inline-block rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-100 mb-6 tracking-wide">
-            AUDIT COMPLETE FOR {shortHost(websiteUrl).toUpperCase()}
+      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12 lg:px-10">
+        {/* HERO (centered, not narrow) */}
+        <div className="mx-auto mb-10 max-w-5xl text-center">
+          <div className="inline-flex items-center justify-center rounded-full bg-rose-50 px-3 py-1 text-xs font-extrabold tracking-wide text-rose-700 ring-1 ring-inset ring-rose-100">
+            AUDIT COMPLETE FOR {safeString(reportRow.case.websiteUrl, "").toUpperCase()}
           </div>
 
-          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-zinc-900 leading-tight">
+          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-zinc-900 sm:text-5xl lg:text-6xl leading-[1.05]">
             You are leaking{" "}
-            <span className="bg-yellow-200 px-2">
-              {moneyRange(leakNums.finalPerYearLow, leakNums.finalPerYearHigh)}
+            <span className="bg-yellow-200 px-2 py-1">
+              {moneyRange(perYearLow, perYearHigh)}
             </span>{" "}
             every single year.
           </h1>
 
-          <p className="mt-6 text-xl text-zinc-600 max-w-2xl mx-auto leading-relaxed">
-            This is profit slipping away because your pricing and offer look weaker than what customers see from your
-            local competitors.
+          <p className="mt-5 text-base text-zinc-600 sm:text-lg lg:text-xl leading-relaxed">
+            {heroSubtitle}
           </p>
+
+          {quickVerdict ? (
+            <div className="mx-auto mt-6 max-w-3xl rounded-xl border border-zinc-200 bg-white p-4 text-left shadow-sm">
+              <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Bottom line</div>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-800">{quickVerdict}</p>
+            </div>
+          ) : null}
         </div>
 
-        {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* LEFT */}
+        {/* Main grid: left content + sticky plan */}
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-8">
+          {/* LEFT (wider content) */}
           <div className="lg:col-span-8 space-y-12">
-            {/* Leak Summary */}
+            {/* Leak summary bento */}
             <section>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Card className="bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 flex flex-col justify-between shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
-                  <div className="absolute top-0 right-0 -mt-8 -mr-8 h-32 w-32 rounded-full bg-white/10 blur-3xl"></div>
-
-                  <div>
-                    <div className="flex items-center gap-2 text-rose-100 mb-3">
-                      <div className="rounded-full bg-white/20 p-1.5">
-                        <LucideAlertOctagon className="w-4 h-4 text-white" />
-                      </div>
-                      <span className="text-xs font-bold uppercase tracking-widest">Total Annual Leak</span>
-                    </div>
-                    <div className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white leading-none shadow-sm">
-                      {moneyRange(leakNums.finalPerYearLow, leakNums.finalPerYearHigh)}
-                    </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {/* Big red card spans nicely on large screens */}
+                <Card className="sm:col-span-2 xl:col-span-1 bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
+                  <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+                  <div className="flex items-center gap-2 text-rose-100">
+                    <span className="rounded-full bg-white/15 p-1.5">
+                      <AlertOctagon className="h-4 w-4 text-white" />
+                    </span>
+                    <span className="text-xs font-extrabold uppercase tracking-widest">Total Annual Leak</span>
                   </div>
 
-                  <div className="mt-10 relative z-10">
-                    <div className="flex justify-between items-end text-xs font-medium text-rose-100 mb-2">
+                  <div className="mt-4 text-4xl font-extrabold tracking-tight leading-none sm:text-5xl">
+                    {moneyRange(perYearLow, perYearHigh)}
+                  </div>
+
+                  <div className="mt-8">
+                    <div className="mb-2 flex items-end justify-between text-xs font-semibold text-rose-100">
                       <span>Pricing + Offer Efficiency</span>
-                      <span className="text-white font-bold">GAP EXISTS</span>
+                      <span className="text-white">GAP EXISTS</span>
                     </div>
 
-                    <div className="relative h-4 w-full bg-black/30 rounded-full overflow-hidden backdrop-blur-sm ring-1 ring-white/10">
-                      <div className="absolute left-0 top-0 h-full bg-white/80 w-[85%] rounded-l-full"></div>
-                      <div className="absolute right-0 top-0 h-full bg-red-600 w-[15%] rounded-r-full"></div>
+                    <div className="relative h-4 w-full overflow-hidden rounded-full bg-black/25 ring-1 ring-inset ring-white/10">
+                      <div className="absolute left-0 top-0 h-full w-[85%] rounded-l-full bg-white/80" />
+                      <div className="absolute right-0 top-0 h-full w-[15%] rounded-r-full bg-red-500" />
                     </div>
 
-                    <p className="mt-3 text-sm font-medium text-rose-50 leading-snug flex items-start gap-2 opacity-90">
-                      <LucideTrendingDown className="w-4 h-4 shrink-0 mt-0.5" />
+                    <p className="mt-3 flex items-start gap-2 text-sm font-medium text-rose-50/95">
+                      <TrendingDown className="mt-0.5 h-4 w-4 shrink-0" />
                       <span>Your competitors are capturing this money. You are not.</span>
                     </p>
                   </div>
                 </Card>
 
-                <div className="grid grid-cols-1 gap-4">
-                  <Card>
-                    <div className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Monthly Cash Impact</div>
-                    <div className="text-2xl font-bold text-zinc-900">
-                      {moneyRange(leakNums.finalPerMonthLow, leakNums.finalPerMonthHigh)}
-                      <span className="text-sm font-medium text-zinc-400 ml-1">/mo</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 mt-1">Money you should be keeping each month.</p>
-                  </Card>
+                <Card>
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Monthly Cash Impact</div>
+                  <div className="mt-2 text-2xl font-extrabold tracking-tight text-zinc-900 sm:text-3xl">
+                    {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
+                    <span className="ml-1 text-sm font-semibold text-zinc-400">/mo</span>
+                  </div>
+                  <p className="mt-2 text-sm text-zinc-600">Money you should be keeping each month.</p>
+                  <div className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700">
+                    Cost of waiting:{" "}
+                    <span className="font-extrabold text-zinc-900">{moneyRange(perWeekLow, perWeekHigh)}</span>{" "}
+                    <span className="text-zinc-500">per week</span>
+                  </div>
+                </Card>
 
-                  <Card>
-                    <div className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Market Perception</div>
-                    <div className="text-xl font-bold text-zinc-900">{marketPosition || "Unknown"}</div>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      If you look “cheap”, you get price-shopped. If you look “safe”, you get chosen.
-                    </p>
-                  </Card>
-                </div>
+                <Card>
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Market Perception</div>
+                  <div className="mt-2 text-xl font-extrabold tracking-tight text-zinc-900">
+                    {perceptionLine}
+                  </div>
+                  <p className="mt-2 text-sm text-zinc-600">
+                    People hire you because you look cheaper or “good enough” — not because you look safest.
+                  </p>
+                  <div className="mt-4 text-xs text-zinc-500">
+                    Built from {competitorCount || "—"} competitors and {proofCount || "—"} proof snippets.
+                  </div>
+                </Card>
               </div>
             </section>
 
-            {/* Top Leaks */}
+            {/* Top leaks */}
             <section>
               <SectionHeader
                 title="Where is the money going?"
-                subtitle="We found these 3 holes. Fix #1 first."
+                subtitle="We found the 3 biggest holes. Fix #1 first."
               />
 
               <div className="space-y-6">
-                {topLeaks.length > 0 ? (
+                {topLeaks.length ? (
                   topLeaks.slice(0, 3).map((leak: any, idx: number) => {
-                    const w = [0.45, 0.35, 0.2][idx] || 0.1;
-                    const impactVal =
-                      leakNums.finalPerMonthLow !== null ? Math.round(leakNums.finalPerMonthLow * w) : null;
+                    const w = leakWeight(idx);
+                    const impact = finalPerMonthLow === null ? null : Math.round(finalPerMonthLow * w);
 
                     return (
                       <div
                         key={idx}
-                        className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
+                        className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
                       >
-                        <div className="flex items-center gap-4 bg-zinc-50/50 p-6 border-b border-zinc-100">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-zinc-200 text-lg font-bold text-zinc-900 shadow-sm">
+                        {/* Header */}
+                        <div className="flex flex-col gap-3 border-b border-zinc-100 bg-zinc-50/60 p-5 sm:flex-row sm:items-center sm:gap-4 sm:p-6">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-base font-extrabold text-zinc-900 shadow-sm">
                             #{idx + 1}
                           </div>
-                          <div>
-                            <h4 className="text-lg font-bold text-zinc-900">
-                              {safeString(leak?.title, "Untitled Issue")}
+
+                          <div className="min-w-0">
+                            <h4 className="text-lg font-extrabold tracking-tight text-zinc-900">
+                              {safeString(leak?.title, "Untitled issue")}
                             </h4>
-                            <div className="flex sm:hidden mt-2">
-                              <ImpactBadge value={moneyCompact(impactVal)} />
-                            </div>
+                            <p className="mt-1 text-sm text-zinc-500">
+                              This is costing you profit every month until it’s fixed.
+                            </p>
                           </div>
-                          <div className="ml-auto hidden sm:block">
-                            <ImpactBadge value={moneyCompact(impactVal)} />
+
+                          <div className="sm:ml-auto">
+                            <ImpactBadge value={moneyCompact(impact)} />
                           </div>
                         </div>
 
-                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* Body */}
+                        <div className="grid grid-cols-1 gap-6 p-5 sm:p-6 md:grid-cols-2 md:gap-10">
                           <div>
-                            <p className="flex items-center gap-2 text-xs font-bold uppercase text-rose-600 mb-2">
-                              <LucideAlertTriangle className="w-3 h-3" /> The Problem
-                            </p>
-                            <p className="text-sm text-zinc-800 leading-relaxed font-medium">
-                              {safeString(leak?.why_it_matters)}
+                            <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-rose-600">
+                              <AlertTriangle className="h-4 w-4" />
+                              The problem
+                            </div>
+                            <p className="text-sm leading-relaxed text-zinc-800 font-medium">
+                              {safeString(leak?.why_it_matters, "—")}
                             </p>
                           </div>
+
                           <div>
-                            <p className="flex items-center gap-2 text-xs font-bold uppercase text-emerald-600 mb-2">
-                              <LucideCheck className="w-3 h-3" /> What Competitors Do
-                            </p>
-                            <p className="text-sm text-zinc-600 leading-relaxed">
-                              {safeString(leak?.market_contrast)}
+                            <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-emerald-600">
+                              <CheckCircle2 className="h-4 w-4" />
+                              What competitors do instead
+                            </div>
+                            <p className="text-sm leading-relaxed text-zinc-700">
+                              {safeString(leak?.market_contrast, "—")}
                             </p>
                           </div>
                         </div>
@@ -452,64 +428,84 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     );
                   })
                 ) : (
-                  <div className="p-6 text-center text-sm text-zinc-500 border border-dashed border-zinc-300 rounded-xl">
-                    No leaks generated for this run.
+                  <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">
+                    No leaks were generated for this run.
                   </div>
                 )}
               </div>
             </section>
 
-            {/* Competitor Matrix */}
+            {/* Offer rebuild */}
             <section>
               <SectionHeader
-                title="The Competitor Landscape"
-                subtitle="This is what customers see and compare you to."
+                title="What to add (so you can charge more)"
+                subtitle="These are simple, proven “add-ons” that help competitors justify higher prices and win better customers."
               />
 
-              <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+              {offers.length ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {offers.slice(0, 6).map((o: any, i: number) => (
+                    <Card key={i} className="bg-white">
+                      <div className="text-sm font-extrabold text-zinc-900">{safeString(o?.title, "Untitled")}</div>
+                      <p className="mt-2 text-sm leading-relaxed text-zinc-600">{safeString(o?.content, "")}</p>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Card className="bg-white">
+                  <div className="text-sm text-zinc-600">No offer rebuild items were generated.</div>
+                </Card>
+              )}
+            </section>
+
+            {/* Competitor table */}
+            <section>
+              <SectionHeader
+                title="Local competitor comparison"
+                subtitle="This is what customers see when they compare you. (Public info pulled from their sites.)"
+              />
+
+              <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm whitespace-nowrap">
-                    <thead className="bg-zinc-50/80 text-xs uppercase font-semibold text-zinc-500">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-zinc-50/80 text-xs uppercase font-extrabold text-zinc-500">
                       <tr>
                         <th className="px-6 py-4">Business</th>
-                        <th className="px-6 py-4">Trip Fee</th>
+                        <th className="px-6 py-4">Trip fee</th>
                         <th className="px-6 py-4">Membership</th>
                         <th className="px-6 py-4">Warranty</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
-                      {competitors.slice(0, 8).map((c: any, i: number) => (
-                        <tr key={i} className="hover:bg-zinc-50/50 transition">
-                          <td className="px-6 py-4 font-medium text-zinc-900">
+                      {competitors.slice(0, 10).map((c: any, i: number) => (
+                        <tr key={i} className="hover:bg-zinc-50/60 transition">
+                          <td className="px-6 py-4 font-semibold text-zinc-900">
                             {c?.url ? (
                               <a
-                                href={c.url}
+                                href={safeString(c.url)}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="flex items-center gap-1 hover:text-blue-600"
+                                className="inline-flex items-center gap-1 hover:text-blue-700"
                               >
-                                {safeString(c?.name, "Unknown")}{" "}
-                                <LucideExternalLink className="w-3 h-3 text-zinc-400" />
+                                {safeString(c?.name, "Unknown")}
+                                <ExternalLink className="h-3 w-3 text-zinc-400" />
                               </a>
                             ) : (
                               safeString(c?.name, "Unknown")
                             )}
+                            {c?.url ? (
+                              <div className="mt-1 text-xs font-medium text-zinc-400">{shortHost(safeString(c.url))}</div>
+                            ) : null}
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 font-medium">
-                            {safeString(c?.trip_fee, "—")}
-                          </td>
-                          <td className="px-6 py-4 text-zinc-600">
-                            {safeString(c?.membership_offer, "—")}
-                          </td>
-                          <td className="px-6 py-4 text-zinc-600">
-                            {safeString(c?.warranty_offer, "—")}
-                          </td>
+                          <td className="px-6 py-4 text-zinc-700">{safeString(c?.trip_fee, "—")}</td>
+                          <td className="px-6 py-4 text-zinc-700">{safeString(c?.membership_offer, "—")}</td>
+                          <td className="px-6 py-4 text-zinc-700">{safeString(c?.warranty_offer, "—")}</td>
                         </tr>
                       ))}
                       {!competitors.length ? (
                         <tr>
                           <td className="px-6 py-6 text-sm text-zinc-500" colSpan={4}>
-                            No competitors extracted for this run.
+                            No competitors were extracted for this run.
                           </td>
                         </tr>
                       ) : null}
@@ -519,104 +515,144 @@ export default async function ReportPage({ params }: { params: { shareId: string
               </div>
             </section>
 
-            {/* Evidence Locker */}
+            {/* Evidence locker */}
             <section>
               <SectionHeader
-                title="Verified Source Data"
-                subtitle={`We didn’t guess. We pulled ${evidence.length} proof snippets from competitor websites to build this report.`}
+                title="Verified source data"
+                subtitle={`We pulled ${proofCount} specific snippets from competitor pages. Open any item to verify.`}
+                right={
+                  <div className="text-xs font-semibold text-zinc-400">
+                    <span className="inline-flex items-center gap-2">
+                      <Search className="h-4 w-4" />
+                      Evidence log
+                    </span>
+                  </div>
+                }
               />
 
-              <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
-                <div className="bg-zinc-50 px-6 py-3 border-b border-zinc-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500">
-                    <LucideSearch className="w-3 h-3" /> Evidence Log
+              <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-6 py-3">
+                  <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">
+                    Proof locker
                   </div>
-                  <div className="text-xs text-zinc-400">Pulled on {new Date().toLocaleDateString()}</div>
+                  <div className="text-xs text-zinc-400">Captured: {new Date().toLocaleDateString()}</div>
                 </div>
 
                 <div className="divide-y divide-zinc-100">
-                  {evidence.length > 0 ? (
+                  {evidence.length ? (
                     evidence.map((e: any, i: number) => {
-                      const label = normalizeEvidenceType(safeString(e?.type, ""));
-                      const competitorName = inferEvidenceCompetitorName(e, competitors);
-                      const src = safeString(e?.source_url, "");
+                      const sourceUrl = safeString(e?.source_url, "");
+                      const label = evidenceTypeLabel(safeString(e?.type, ""));
+                      const who = inferCompetitorNameFromUrl(sourceUrl, competitors);
 
                       return (
-                        <div
-                          key={i}
-                          className="p-5 hover:bg-zinc-50/50 transition flex flex-col sm:flex-row gap-4 sm:items-start"
-                        >
-                          <div className="shrink-0">
-                            <span className="inline-flex items-center rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10 w-24 justify-center">
-                              {label}
-                            </span>
-                          </div>
+                        <details key={i} className="group">
+                          <summary className="cursor-pointer list-none px-6 py-5 hover:bg-zinc-50/60 transition">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex w-28 justify-center rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-extrabold text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
+                                    {label}
+                                  </span>
+                                  <span className="text-xs font-extrabold text-zinc-900">{who}</span>
+                                  <span className="text-xs text-zinc-300">•</span>
+                                  <span className="text-xs text-zinc-500 truncate max-w-[52ch]">
+                                    {shortHost(sourceUrl)}
+                                  </span>
+                                </div>
 
-                          <div className="grow">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-xs font-bold text-zinc-900">{competitorName}</span>
-                              <span className="text-xs text-zinc-400">•</span>
-                              {src ? (
+                                <div className="mt-2 text-sm text-zinc-700 line-clamp-2">
+                                  “{safeString(e?.snippet, "—").replace(/\s+/g, " ").trim()}”
+                                </div>
+                              </div>
+
+                              {sourceUrl ? (
                                 <a
-                                  href={src}
+                                  href={sourceUrl}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                  className="inline-flex items-center gap-1 text-xs font-extrabold text-blue-700 hover:underline"
+                                  onClick={(ev) => ev.stopPropagation()}
                                 >
-                                  Verify Source <LucideExternalLink className="w-2.5 h-2.5" />
+                                  Verify source <ExternalLink className="h-3 w-3" />
                                 </a>
                               ) : (
                                 <span className="text-xs text-zinc-400">No source URL</span>
                               )}
                             </div>
+                          </summary>
 
-                            <p className="text-sm text-zinc-600 font-mono bg-zinc-50 p-2 rounded border border-zinc-100 mt-2">
-                              “{safeString(e?.snippet, "—")}”
-                            </p>
+                          <div className="px-6 pb-6">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                              <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">
+                                Raw snippet
+                              </div>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 font-mono">
+                                {safeString(e?.snippet, "—")}
+                              </p>
+                            </div>
                           </div>
-                        </div>
+                        </details>
                       );
                     })
                   ) : (
-                    <div className="p-8 text-center text-sm text-zinc-500">No raw evidence logs available.</div>
+                    <div className="px-6 py-10 text-center text-sm text-zinc-500">
+                      No evidence was extracted for this run.
+                    </div>
                   )}
                 </div>
               </div>
             </section>
+
+            {/* “Later” actions (optional, keeps page useful) */}
+            {doLater.length ? (
+              <section>
+                <SectionHeader
+                  title="After you fix the first 3"
+                  subtitle="These are the next moves (still important, just not urgent)."
+                />
+                <Card>
+                  <ol className="list-decimal pl-5 text-sm text-zinc-700 space-y-2">
+                    {doLater.map((x, i) => (
+                      <li key={i} className="leading-relaxed">{x}</li>
+                    ))}
+                  </ol>
+                </Card>
+              </section>
+            ) : null}
           </div>
 
-          {/* RIGHT (Sticky Plan) */}
+          {/* RIGHT (sticky plan) */}
           <div className="lg:col-span-4">
-            <div className="sticky top-24 space-y-6">
-              <div className="rounded-xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-blue-900">
-                <div className="mb-4 flex items-center gap-3 border-b border-white/10 pb-4">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white font-bold">
-                    <LucideFileText className="w-4 h-4" />
+            <div className="lg:sticky lg:top-24 space-y-6">
+              {/* Plan card */}
+              <div className="rounded-2xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-blue-900">
+                <div className="mb-4 flex items-start gap-3 border-b border-white/10 pb-4">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
+                    <FileText className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="font-bold tracking-wide text-lg">Your Plan</h3>
-                    <p className="text-xs text-blue-200">72-Hour Turnaround</p>
+                    <div className="text-lg font-extrabold tracking-tight">Your Plan</div>
+                    <div className="text-xs font-semibold text-blue-200">72-hour turnaround</div>
                   </div>
                 </div>
 
-                <p className="mb-6 text-sm text-blue-100 leading-relaxed">
-                  Stop the bleeding first. Do these 3 things now to recover{" "}
-                  <span className="font-bold text-white border-b border-white/30">
-                    ~{moneyCompact(leakNums.finalPerMonthLow)}/mo
+                <p className="mb-6 text-sm leading-relaxed text-blue-100">
+                  Stop the bleeding first. Do these 3 things this week to recover{" "}
+                  <span className="font-extrabold text-white border-b border-white/30">
+                    ~{moneyCompact(finalPerMonthLow)}/mo
                   </span>
                   .
                 </p>
 
                 <ul className="space-y-4">
-                  {doFirst.length > 0 ? (
-                    doFirst.map((action: string, i: number) => (
-                      <li key={i} className="flex gap-3 items-start">
-                        <div className="mt-0.5 shrink-0 text-blue-300">
-                          <div className="h-5 w-5 rounded-full border border-blue-400 flex items-center justify-center">
-                            <span className="text-[10px] font-bold">{i + 1}</span>
-                          </div>
+                  {doFirst.length ? (
+                    doFirst.map((action, i) => (
+                      <li key={i} className="flex gap-3">
+                        <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-blue-300/50 text-[11px] font-extrabold text-blue-100">
+                          {i + 1}
                         </div>
-                        <span className="text-sm font-medium leading-relaxed text-white">{action}</span>
+                        <span className="text-sm font-semibold leading-relaxed text-white">{action}</span>
                       </li>
                     ))
                   ) : (
@@ -624,25 +660,60 @@ export default async function ReportPage({ params }: { params: { shareId: string
                   )}
                 </ul>
 
+                {/* Keep CTA but make it non-breaking (no mock behavior) */}
                 <div className="mt-8">
-                  <a
-                    href={mailtoHref}
-                    className="block w-full rounded-lg bg-white py-3 text-center text-sm font-bold text-blue-900 hover:bg-blue-50 transition shadow-sm"
+                  <button
+                    type="button"
+                    className="w-full rounded-xl bg-white py-3 text-sm font-extrabold text-blue-900 hover:bg-blue-50 transition shadow-sm"
+                    onClick={() => {
+                      // Placeholder: wire to your email flow later.
+                      // This won't break SSR builds and won't show mock data.
+                      alert("Email flow not connected yet. (We’ll wire this next.)");
+                    }}
                   >
                     Send This Plan To My Email
-                  </a>
-                  <div className="mt-2 text-[11px] text-blue-200">
-                    (Opens your email app. No login needed.)
-                  </div>
+                  </button>
+                </div>
+
+                <div className="mt-4 text-xs text-blue-200">
+                  Tip: forward this to your office manager. It’s designed to be “doable”.
                 </div>
               </div>
 
-              <Card className="bg-white">
-                <h4 className="font-bold text-zinc-900 text-sm flex items-center gap-2 mb-2">Why trust this?</h4>
-                <p className="text-xs leading-relaxed text-zinc-500">
-                  We pulled proof from {competitorCount} direct competitors in your area. This report is built from what
-                  they show publicly (fees, plans, warranties). It’s not “AI guessing.”
-                </p>
+              {/* Trust card */}
+              <Card>
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100">
+                    <Search className="h-5 w-5 text-zinc-700" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-extrabold text-zinc-900">Why trust this?</div>
+                    <p className="mt-1 text-sm leading-relaxed text-zinc-600">
+                      This isn’t guessing. We pulled public pricing / membership / warranty info from{" "}
+                      <span className="font-extrabold text-zinc-900">{competitorCount || "—"}</span> direct competitors and logged{" "}
+                      <span className="font-extrabold text-zinc-900">{proofCount || "—"}</span> proof snippets.
+                      This is what your market is doing right now.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Quick context (keeps it “official”) */}
+              <Card>
+                <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Report notes</div>
+                <div className="mt-2 text-sm text-zinc-700 space-y-2">
+                  <div>
+                    <span className="font-extrabold text-zinc-900">Confidence:</span>{" "}
+                    {confidenceMeta(confidence).label}
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-zinc-900">Market position:</span>{" "}
+                    {marketPosition || "Not detected"}
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    Numbers are ranges (not fantasy precision). We use ranges so you can act safely and fast.
+                  </div>
+                </div>
               </Card>
             </div>
           </div>
