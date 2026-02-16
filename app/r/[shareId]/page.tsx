@@ -20,11 +20,9 @@ type ReportAny = any;
 function safeArray<T = any>(v: any): T[] {
   return Array.isArray(v) ? v : [];
 }
-
 function safeString(v: any, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
-
 function num(v: any): number | null {
   if (v === null || v === undefined) return null;
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -34,12 +32,10 @@ function num(v: any): number | null {
   }
   return null;
 }
-
 function money(n: number | null): string {
   if (n === null) return "—";
   return `$${Math.round(n).toLocaleString()}`;
 }
-
 function moneyCompact(n: number | null): string {
   if (n === null) return "—";
   const abs = Math.abs(n);
@@ -47,21 +43,18 @@ function moneyCompact(n: number | null): string {
   if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
   return `$${Math.round(n).toLocaleString()}`;
 }
-
 function moneyRange(lo: number | null, hi: number | null): string {
   if (lo === null && hi === null) return "—";
   if (lo !== null && hi === null) return money(lo);
   if (lo === null && hi !== null) return money(hi);
   return `${money(lo)}–${money(hi)}`;
 }
-
 function shortHost(url: string) {
   return (url || "")
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "")
     .replace(/^www\./, "");
 }
-
 function confidenceMeta(level: string) {
   const c = (level || "").toUpperCase();
   if (c === "HIGH") {
@@ -87,7 +80,6 @@ function confidenceMeta(level: string) {
     pulse: false,
   };
 }
-
 function evidenceTypeLabel(t: string) {
   const x = (t || "").toLowerCase();
   if (x === "pricing") return "Pricing";
@@ -96,12 +88,10 @@ function evidenceTypeLabel(t: string) {
   if (x === "guarantee") return "Warranty/Guarantee";
   return "Other";
 }
-
 function leakWeight(idx: number) {
   const weights = [0.45, 0.35, 0.2];
   return weights[idx] ?? 0.15;
 }
-
 function inferCompetitorNameFromUrl(sourceUrl: string, competitors: any[]) {
   const host = shortHost(sourceUrl);
   if (!host) return "Source";
@@ -127,7 +117,7 @@ function Card({
 }) {
   return (
     <div className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm ${className}`}>
-      <div className={noPad ? "" : "p-5 sm:p-6"}>{children}</div>
+      <div className={noPad ? "" : "p-6"}>{children}</div>
     </div>
   );
 }
@@ -142,7 +132,7 @@ function SectionHeader({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <h3 className="text-xl font-extrabold tracking-tight text-zinc-900">{title}</h3>
         {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-relaxed text-zinc-500">{subtitle}</p> : null}
@@ -205,7 +195,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const perMonthLow = num(leakObj?.per_month_low ?? leakObj?.monthly_low);
   const perMonthHigh = num(leakObj?.per_month_high ?? leakObj?.monthly_high);
 
-  // Derive yearly if missing
   const perYearLow =
     num(leakObj?.per_year_low ?? leakObj?.yearly_low) ?? (perMonthLow !== null ? perMonthLow * 12 : null);
   const perYearHigh =
@@ -217,20 +206,15 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const competitorCount = competitors.length;
   const proofCount = evidence.length;
 
-  // Cost of delay
   const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
   const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
 
   const headerCaseHost = shortHost(reportRow.case?.websiteUrl ?? "");
   const headerLocation = safeString(reportRow.case?.location, "");
 
-  const heroSubtitle =
-    "This is profit slipping away because your pricing and offer look weaker than what customers see from local competitors.";
-
   const perceptionLine =
     marketPosition || "Unclear positioning (customers can’t quickly tell why you cost more).";
 
-  // Server-safe email: mailto link only
   const emailSubject = encodeURIComponent(`ProfitAudit plan for ${headerCaseHost || "your business"}`);
   const emailBody = encodeURIComponent(
     `Here are the 3 actions to do this week:\n\n${doFirst.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\n— ProfitAudit`
@@ -240,7 +224,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
       {/* Navbar */}
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-10">
+        <div className="mx-auto max-w-[1180px] px-5 sm:px-8">
           <div className="flex h-16 items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-900 text-white font-extrabold tracking-tight">
@@ -274,40 +258,41 @@ export default async function ReportPage({ params }: { params: { shareId: string
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12 lg:px-10">
+      <main className="mx-auto max-w-[1180px] px-5 py-10 sm:px-8 sm:py-14">
         {/* HERO */}
-        <div className="mx-auto mb-10 max-w-5xl text-center">
+        <div className="mx-auto mb-12 max-w-5xl text-center">
           <div className="inline-flex items-center justify-center rounded-full bg-rose-50 px-3 py-1 text-xs font-extrabold tracking-wide text-rose-700 ring-1 ring-inset ring-rose-100">
             AUDIT COMPLETE FOR {safeString(reportRow.case?.websiteUrl, "").toUpperCase()}
           </div>
 
-          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-zinc-900 sm:text-5xl lg:text-6xl leading-[1.05]">
+          <h1 className="mt-7 text-4xl font-extrabold tracking-tight text-zinc-900 sm:text-5xl lg:text-6xl leading-[1.06]">
             You are leaking{" "}
             <span className="bg-yellow-200 px-2 py-1">{moneyRange(perYearLow, perYearHigh)}</span>{" "}
             every single year.
           </h1>
 
-          <p className="mt-5 text-base text-zinc-600 sm:text-lg lg:text-xl leading-relaxed">
-            {heroSubtitle}
+          <p className="mt-6 text-base text-zinc-600 sm:text-lg lg:text-xl leading-relaxed">
+            This is profit slipping away because your pricing and offer look weaker than what customers see from local competitors.
           </p>
 
           {quickVerdict ? (
-            <div className="mx-auto mt-6 max-w-3xl rounded-xl border border-zinc-200 bg-white p-4 text-left shadow-sm">
+            <div className="mx-auto mt-7 max-w-3xl rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm">
               <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Bottom line</div>
               <p className="mt-2 text-sm leading-relaxed text-zinc-800">{quickVerdict}</p>
             </div>
           ) : null}
         </div>
 
-        {/* Main grid */}
-        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-8">
-          {/* LEFT */}
-          <div className="lg:col-span-8 space-y-12">
-            {/* Bento */}
+        {/* 12-col layout (Gemini-like) */}
+        <div className="grid grid-cols-12 gap-7">
+          {/* LEFT 8 cols */}
+          <div className="col-span-12 lg:col-span-8 space-y-14">
+            {/* Bento (true 12-col inside left block) */}
             <section>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                <Card className="sm:col-span-2 xl:col-span-1 bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
-                  <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+              <div className="grid grid-cols-12 gap-5">
+                {/* Big red */}
+                <Card className="col-span-12 lg:col-span-6 bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
+                  <div className="absolute -right-12 -top-12 h-44 w-44 rounded-full bg-white/10 blur-3xl" />
                   <div className="flex items-center gap-2 text-rose-100">
                     <span className="rounded-full bg-white/15 p-1.5">
                       <AlertOctagon className="h-4 w-4 text-white" />
@@ -315,11 +300,11 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     <span className="text-xs font-extrabold uppercase tracking-widest">Total Annual Leak</span>
                   </div>
 
-                  <div className="mt-4 text-4xl font-extrabold tracking-tight leading-none sm:text-5xl">
+                  <div className="mt-5 text-5xl font-extrabold tracking-tight leading-none">
                     {moneyRange(perYearLow, perYearHigh)}
                   </div>
 
-                  <div className="mt-8">
+                  <div className="mt-10">
                     <div className="mb-2 flex items-end justify-between text-xs font-semibold text-rose-100">
                       <span>Pricing + Offer Efficiency</span>
                       <span className="text-white">GAP EXISTS</span>
@@ -330,37 +315,40 @@ export default async function ReportPage({ params }: { params: { shareId: string
                       <div className="absolute right-0 top-0 h-full w-[15%] rounded-r-full bg-red-500" />
                     </div>
 
-                    <p className="mt-3 flex items-start gap-2 text-sm font-medium text-rose-50/95">
+                    <p className="mt-4 flex items-start gap-2 text-sm font-medium text-rose-50/95">
                       <TrendingDown className="mt-0.5 h-4 w-4 shrink-0" />
                       <span>Your competitors are capturing this money. You are not.</span>
                     </p>
                   </div>
                 </Card>
 
-                <Card>
-                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Monthly Cash Impact</div>
-                  <div className="mt-2 text-2xl font-extrabold tracking-tight text-zinc-900 sm:text-3xl">
-                    {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
-                    <span className="ml-1 text-sm font-semibold text-zinc-400">/mo</span>
-                  </div>
-                  <p className="mt-2 text-sm text-zinc-600">Money you should be keeping each month.</p>
-                  <div className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700">
-                    Cost of waiting:{" "}
-                    <span className="font-extrabold text-zinc-900">{moneyRange(perWeekLow, perWeekHigh)}</span>{" "}
-                    <span className="text-zinc-500">per week</span>
-                  </div>
-                </Card>
+                {/* Right stack of 2 */}
+                <div className="col-span-12 lg:col-span-6 grid grid-cols-12 gap-5">
+                  <Card className="col-span-12">
+                    <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Monthly Cash Impact</div>
+                    <div className="mt-2 text-3xl font-extrabold tracking-tight text-zinc-900">
+                      {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
+                      <span className="ml-1 text-sm font-semibold text-zinc-400">/mo</span>
+                    </div>
+                    <p className="mt-2 text-sm text-zinc-600">Money you should be keeping each month.</p>
+                    <div className="mt-4 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+                      Cost of waiting:{" "}
+                      <span className="font-extrabold text-zinc-900">{moneyRange(perWeekLow, perWeekHigh)}</span>{" "}
+                      <span className="text-zinc-500">per week</span>
+                    </div>
+                  </Card>
 
-                <Card>
-                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Market Perception</div>
-                  <div className="mt-2 text-xl font-extrabold tracking-tight text-zinc-900">{perceptionLine}</div>
-                  <p className="mt-2 text-sm text-zinc-600">
-                    People hire you because you look cheaper or “good enough” — not because you look safest.
-                  </p>
-                  <div className="mt-4 text-xs text-zinc-500">
-                    Built from {competitorCount || "—"} competitors and {proofCount || "—"} proof snippets.
-                  </div>
-                </Card>
+                  <Card className="col-span-12">
+                    <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Market Perception</div>
+                    <div className="mt-2 text-xl font-extrabold tracking-tight text-zinc-900">{perceptionLine}</div>
+                    <p className="mt-2 text-sm text-zinc-600">
+                      People hire you because you look cheaper or “good enough” — not because you look safest.
+                    </p>
+                    <div className="mt-4 text-xs text-zinc-500">
+                      Built from {competitorCount || "—"} competitors and {proofCount || "—"} proof snippets.
+                    </div>
+                  </Card>
+                </div>
               </div>
             </section>
 
@@ -377,10 +365,10 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     return (
                       <div
                         key={idx}
-                        className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
+                        className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
                       >
-                        <div className="flex flex-col gap-3 border-b border-zinc-100 bg-zinc-50/60 p-5 sm:flex-row sm:items-center sm:gap-4 sm:p-6">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-base font-extrabold text-zinc-900 shadow-sm">
+                        <div className="flex flex-col gap-3 border-b border-zinc-100 bg-zinc-50/60 p-6 sm:flex-row sm:items-center sm:gap-4">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-base font-extrabold text-zinc-900 shadow-sm">
                             #{idx + 1}
                           </div>
 
@@ -388,7 +376,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                             <h4 className="text-lg font-extrabold tracking-tight text-zinc-900">
                               {safeString(leak?.title, "Untitled issue")}
                             </h4>
-                            <p className="mt-1 text-sm text-zinc-500">This keeps draining profit until it’s fixed.</p>
+                            <p className="mt-1 text-sm text-zinc-500">This drains profit until it’s fixed.</p>
                           </div>
 
                           <div className="sm:ml-auto">
@@ -396,7 +384,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-6 p-5 sm:p-6 md:grid-cols-2 md:gap-10">
+                        <div className="grid grid-cols-1 gap-8 p-6 md:grid-cols-2">
                           <div>
                             <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-rose-600">
                               <AlertTriangle className="h-4 w-4" />
@@ -421,7 +409,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     );
                   })
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">
+                  <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
                     No leaks were generated for this run.
                   </div>
                 )}
@@ -432,26 +420,26 @@ export default async function ReportPage({ params }: { params: { shareId: string
             <section>
               <SectionHeader
                 title="What to add (so you can charge more)"
-                subtitle="Simple, proven add-ons that help competitors justify higher prices and win better customers."
+                subtitle="Simple add-ons competitors use to justify higher prices and win better customers."
               />
 
               {offers.length ? (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                   {offers.slice(0, 6).map((o: any, i: number) => (
-                    <Card key={i} className="bg-white">
+                    <Card key={i}>
                       <div className="text-sm font-extrabold text-zinc-900">{safeString(o?.title, "Untitled")}</div>
                       <p className="mt-2 text-sm leading-relaxed text-zinc-600">{safeString(o?.content, "")}</p>
                     </Card>
                   ))}
                 </div>
               ) : (
-                <Card className="bg-white">
+                <Card>
                   <div className="text-sm text-zinc-600">No offer rebuild items were generated.</div>
                 </Card>
               )}
             </section>
 
-            {/* Competitors */}
+            {/* Competitors table */}
             <section>
               <SectionHeader
                 title="Local competitor comparison"
@@ -539,7 +527,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                           <summary className="cursor-pointer list-none px-6 py-5 hover:bg-zinc-50/60 transition">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span className="inline-flex w-32 justify-center rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-extrabold text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
                                     {label}
                                   </span>
@@ -550,7 +538,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                                   </span>
                                 </div>
 
-                                <div className="mt-2 text-sm text-zinc-700 line-clamp-2">
+                                <div className="mt-2 text-sm text-zinc-700">
                                   “{safeString(e?.snippet, "—").replace(/\s+/g, " ").trim()}”
                                 </div>
                               </div>
@@ -582,7 +570,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                       );
                     })
                   ) : (
-                    <div className="px-6 py-10 text-center text-sm text-zinc-500">No evidence was extracted for this run.</div>
+                    <div className="px-6 py-12 text-center text-sm text-zinc-500">No evidence was extracted for this run.</div>
                   )}
                 </div>
               </div>
@@ -602,12 +590,12 @@ export default async function ReportPage({ params }: { params: { shareId: string
             ) : null}
           </div>
 
-          {/* RIGHT */}
-          <div className="lg:col-span-4">
+          {/* RIGHT 4 cols (sticky plan) */}
+          <div className="col-span-12 lg:col-span-4">
             <div className="lg:sticky lg:top-24 space-y-6">
               <div className="rounded-2xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-blue-900">
                 <div className="mb-4 flex items-start gap-3 border-b border-white/10 pb-4">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10">
                     <FileText className="h-5 w-5" />
                   </div>
                   <div>
@@ -628,7 +616,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                   {doFirst.length ? (
                     doFirst.map((action, i) => (
                       <li key={i} className="flex gap-3">
-                        <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-blue-300/50 text-[11px] font-extrabold text-blue-100">
+                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-300/50 text-[11px] font-extrabold text-blue-100">
                           {i + 1}
                         </div>
                         <span className="text-sm font-semibold leading-relaxed text-white">{action}</span>
@@ -654,25 +642,18 @@ export default async function ReportPage({ params }: { params: { shareId: string
               </div>
 
               <Card>
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100">
-                    <Search className="h-5 w-5 text-zinc-700" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-extrabold text-zinc-900">Why trust this?</div>
-                    <p className="mt-1 text-sm leading-relaxed text-zinc-600">
-                      This isn’t guessing. We pulled public pricing / membership / warranty info from{" "}
-                      <span className="font-extrabold text-zinc-900">{competitorCount || "—"}</span> direct competitors and logged{" "}
-                      <span className="font-extrabold text-zinc-900">{proofCount || "—"}</span> proof snippets.
-                      This is what your market is doing right now.
-                    </p>
-                  </div>
-                </div>
+                <div className="text-sm font-extrabold text-zinc-900">Why trust this?</div>
+                <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+                  This isn’t guessing. We pulled public pricing / membership / warranty info from{" "}
+                  <span className="font-extrabold text-zinc-900">{competitorCount || "—"}</span> direct competitors and logged{" "}
+                  <span className="font-extrabold text-zinc-900">{proofCount || "—"}</span> proof snippets.
+                  This is what your market is doing right now.
+                </p>
               </Card>
 
               <Card>
                 <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Report notes</div>
-                <div className="mt-2 text-sm text-zinc-700 space-y-2">
+                <div className="mt-3 text-sm text-zinc-700 space-y-2">
                   <div>
                     <span className="font-extrabold text-zinc-900">Confidence:</span> {confidenceMeta(confidence).label}
                   </div>
