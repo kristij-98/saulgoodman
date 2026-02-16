@@ -2,21 +2,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import {
-  AlertOctagon,
-  AlertTriangle,
-  CheckCircle2,
-  ExternalLink,
-  FileText,
-  Search,
-  TrendingDown,
-} from "lucide-react";
 
+// -------------------------
+// Types & helpers
+// -------------------------
 type ReportAny = any;
 
-// -----------------------------
-// Helpers (safe + formatting)
-// -----------------------------
 function safeArray<T = any>(v: any): T[] {
   return Array.isArray(v) ? v : [];
 }
@@ -55,117 +46,36 @@ function shortHost(url: string) {
     .replace(/\/$/, "")
     .replace(/^www\./, "");
 }
-function confidenceMeta(level: string) {
+
+function confidenceBadge(level: string) {
   const c = (level || "").toUpperCase();
-  if (c === "HIGH") {
-    return {
-      label: "High Confidence",
-      cls: "bg-emerald-50 text-emerald-700 ring-emerald-200/60",
-      dot: "bg-emerald-600",
-      pulse: true,
-    };
-  }
-  if (c === "MED") {
-    return {
-      label: "Medium Confidence",
-      cls: "bg-amber-50 text-amber-700 ring-amber-200/60",
-      dot: "bg-amber-600",
-      pulse: false,
-    };
-  }
-  return {
-    label: "Low Confidence",
-    cls: "bg-zinc-100 text-zinc-600 ring-zinc-200",
-    dot: "bg-zinc-500",
-    pulse: false,
-  };
+  if (c === "HIGH") return { label: "High confidence", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200/60" };
+  if (c === "MED") return { label: "Medium confidence", cls: "bg-amber-50 text-amber-700 ring-amber-200/60" };
+  return { label: "Low confidence", cls: "bg-zinc-100 text-zinc-600 ring-zinc-200" };
 }
+
+// Honest allocation for “impact per leak” (planning estimate, not precision).
+function allocateLeak(perMonthLow: number | null, idx: number) {
+  const weights = [0.45, 0.35, 0.20];
+  const w = weights[idx] ?? 0.2;
+  if (perMonthLow === null) return null;
+  return Math.round(perMonthLow * w);
+}
+
 function evidenceTypeLabel(t: string) {
   const x = (t || "").toLowerCase();
   if (x === "pricing") return "Pricing";
   if (x === "service") return "Service";
   if (x === "reputation") return "Reputation";
-  if (x === "guarantee") return "Warranty/Guarantee";
-  return "Other";
-}
-function leakWeight(idx: number) {
-  const weights = [0.45, 0.35, 0.2];
-  return weights[idx] ?? 0.15;
-}
-function inferCompetitorNameFromUrl(sourceUrl: string, competitors: any[]) {
-  const host = shortHost(sourceUrl);
-  if (!host) return "Source";
-  const match = competitors.find((c) => {
-    const cu = shortHost(safeString(c?.url, ""));
-    return cu && host.includes(cu);
-  });
-  if (match?.name) return safeString(match.name, "Source");
-  return host;
+  if (x === "guarantee") return "Guarantee";
+  if (x === "membership") return "Membership";
+  if (x === "warranty") return "Warranty";
+  return "Evidence";
 }
 
-// -----------------------------
-// UI atoms
-// -----------------------------
-function Card({
-  children,
-  className = "",
-  noPad = false,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  noPad?: boolean;
-}) {
-  return (
-    <div className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm ${className}`}>
-      <div className={noPad ? "" : "p-6"}>{children}</div>
-    </div>
-  );
-}
-
-function SectionHeader({
-  title,
-  subtitle,
-  right,
-}: {
-  title: string;
-  subtitle?: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h3 className="text-xl font-extrabold tracking-tight text-zinc-900">{title}</h3>
-        {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-relaxed text-zinc-500">{subtitle}</p> : null}
-      </div>
-      {right ? <div className="sm:pb-1">{right}</div> : null}
-    </div>
-  );
-}
-
-function ImpactBadge({ value }: { value: string }) {
-  return (
-    <span className="inline-flex items-center rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-100">
-      -{value}/mo
-    </span>
-  );
-}
-
-function ConfidenceBadge({ level }: { level: string }) {
-  const m = confidenceMeta(level);
-  return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px] font-semibold tracking-wide ring-1 ring-inset ${m.cls}`}>
-      <span className="relative flex h-2 w-2">
-        {m.pulse ? <span className={`absolute inline-flex h-full w-full rounded-full ${m.dot} opacity-30 animate-ping`} /> : null}
-        <span className={`relative inline-flex h-2 w-2 rounded-full ${m.dot}`} />
-      </span>
-      {m.label}
-    </span>
-  );
-}
-
-// -----------------------------
+// -------------------------
 // Page
-// -----------------------------
+// -------------------------
 export default async function ReportPage({ params }: { params: { shareId: string } }) {
   const shareId = params.shareId;
 
@@ -177,230 +87,221 @@ export default async function ReportPage({ params }: { params: { shareId: string
   if (!reportRow) return notFound();
 
   const data = (reportRow.content ?? {}) as ReportAny;
+  const meta = data?.meta ?? {};
 
-  const confidence = safeString(data?.meta?.confidence, "LOW");
-  const marketPosition = safeString(data?.market_position, "");
-  const quickVerdict = safeString(data?.quick_verdict, "");
+  const confidence = safeString(meta?.confidence, "LOW");
+  const conf = confidenceBadge(confidence);
 
-  const competitors = safeArray(data?.competitors);
-  const evidence = safeArray(data?.evidence_drawer);
   const topLeaks = safeArray(data?.top_leaks_ranked);
   const offers = safeArray(data?.offer_rebuild);
+  const competitors = safeArray(data?.competitors);
+  const evidence = safeArray(data?.evidence_drawer);
   const nextActions = safeArray<string>(data?.next_7_days).filter(Boolean);
+
+  // Leak numbers (support slightly different keys, just in case)
+  const leaks = data?.benchmark_data?.leaks ?? {};
+  const perMonthLow = num(leaks?.per_month_low ?? leaks?.monthly_low);
+  const perMonthHigh = num(leaks?.per_month_high ?? leaks?.monthly_high);
+  const perYearLow = num(leaks?.per_year_low ?? leaks?.yearly_low) ?? (perMonthLow ? perMonthLow * 12 : null);
+  const perYearHigh = num(leaks?.per_year_high ?? leaks?.yearly_high) ?? (perMonthHigh ? perMonthHigh * 12 : null);
+
+  const site = reportRow.case.websiteUrl;
+  const location = reportRow.case.location;
 
   const doFirst = nextActions.slice(0, 3);
   const doLater = nextActions.slice(3, 10);
 
-  const leakObj = data?.benchmark_data?.leaks ?? {};
-  const perMonthLow = num(leakObj?.per_month_low ?? leakObj?.monthly_low);
-  const perMonthHigh = num(leakObj?.per_month_high ?? leakObj?.monthly_high);
+  // Competitor table rows
+  const compRows = competitors.slice(0, 8).map((c: any) => ({
+    name: safeString(c?.name, "Competitor"),
+    url: safeString(c?.url, ""),
+    trip_fee: safeString(c?.trip_fee, "—"),
+    membership_offer: safeString(c?.membership_offer, "—"),
+    warranty_offer: safeString(c?.warranty_offer, "—"),
+  }));
 
-  const perYearLow =
-    num(leakObj?.per_year_low ?? leakObj?.yearly_low) ?? (perMonthLow !== null ? perMonthLow * 12 : null);
-  const perYearHigh =
-    num(leakObj?.per_year_high ?? leakObj?.yearly_high) ?? (perMonthHigh !== null ? perMonthHigh * 12 : null);
-
-  const finalPerMonthLow = perMonthLow ?? perMonthHigh;
-  const finalPerMonthHigh = perMonthHigh ?? perMonthLow;
-
-  const competitorCount = competitors.length;
-  const proofCount = evidence.length;
-
-  const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
-  const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
-
-  const headerCaseHost = shortHost(reportRow.case?.websiteUrl ?? "");
-  const headerLocation = safeString(reportRow.case?.location, "");
-
-  const perceptionLine =
-    marketPosition || "Unclear positioning (customers can’t quickly tell why you cost more).";
-
-  const emailSubject = encodeURIComponent(`ProfitAudit plan for ${headerCaseHost || "your business"}`);
-  const emailBody = encodeURIComponent(
-    `Here are the 3 actions to do this week:\n\n${doFirst.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\n— ProfitAudit`
-  );
+  // If report has market_position use it, otherwise keep empty.
+  const marketPosition = safeString(data?.market_position, "");
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      {/* Navbar */}
-      <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto max-w-[1180px] px-5 sm:px-8">
-          <div className="flex h-16 items-center justify-between gap-4">
+      {/* Sticky top bar */}
+      <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-900 text-white font-extrabold tracking-tight">
-                PA.
+              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-900 text-white font-extrabold tracking-tight">
+                PA
               </div>
-              <div className="leading-tight">
-                <div className="text-sm font-extrabold">ProfitAudit</div>
-                <div className="hidden sm:block text-xs text-zinc-500">High-end offer + pricing audit</div>
+              <div className="hidden sm:block">
+                <div className="text-sm font-bold leading-none">Profit Leak Attorney</div>
+                <div className="text-xs text-zinc-500 leading-none mt-1">Audit report</div>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden md:block">
-                <ConfidenceBadge level={confidence} />
+              <span className={`hidden sm:inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${conf.cls}`}>
+                {conf.label}
+              </span>
+              <div className="text-xs text-zinc-400">
+                Case: <span className="text-zinc-600 font-medium">{shortHost(site)}</span>
               </div>
-
-              <div className="hidden sm:block text-xs text-zinc-500">
-                Case: <span className="font-semibold text-zinc-700">{headerCaseHost || "—"}</span>
-                {headerLocation ? <span className="text-zinc-300"> • </span> : null}
-                {headerLocation ? <span className="font-semibold text-zinc-700">{headerLocation}</span> : null}
-              </div>
-
               <Link
                 href="/new"
-                className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+                className="ml-1 inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800"
               >
-                Run Another Audit
+                Run another
               </Link>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1180px] px-5 py-10 sm:px-8 sm:py-14">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
         {/* HERO */}
-        <div className="mx-auto mb-12 max-w-5xl text-center">
-          <div className="inline-flex items-center justify-center rounded-full bg-rose-50 px-3 py-1 text-xs font-extrabold tracking-wide text-rose-700 ring-1 ring-inset ring-rose-100">
-            AUDIT COMPLETE FOR {safeString(reportRow.case?.websiteUrl, "").toUpperCase()}
+        <div className="mx-auto max-w-4xl text-center">
+          <div className="inline-flex items-center rounded-full bg-rose-50 px-3 py-1 text-xs font-extrabold text-rose-700 ring-1 ring-inset ring-rose-100 tracking-wide">
+            AUDIT COMPLETE • {shortHost(site).toUpperCase()} • {location}
           </div>
 
-          <h1 className="mt-7 text-4xl font-extrabold tracking-tight text-zinc-900 sm:text-5xl lg:text-6xl leading-[1.06]">
+          <h1 className="mt-6 text-3xl sm:text-4xl lg:text-6xl font-extrabold tracking-tight leading-tight">
             You are leaking{" "}
-            <span className="bg-yellow-200 px-2 py-1">{moneyRange(perYearLow, perYearHigh)}</span>{" "}
-            every single year.
+            <span className="bg-yellow-200 px-2">
+              {moneyRange(perYearLow, perYearHigh)}
+            </span>{" "}
+            every year.
           </h1>
 
-          <p className="mt-6 text-base text-zinc-600 sm:text-lg lg:text-xl leading-relaxed">
-            This is profit slipping away because your pricing and offer look weaker than what customers see from local competitors.
+          <p className="mt-4 text-base sm:text-lg text-zinc-600 leading-relaxed">
+            This is profit you’re losing because of weak pricing, missing offers, and unclear guarantees — compared to the businesses around you.
           </p>
 
-          {quickVerdict ? (
-            <div className="mx-auto mt-7 max-w-3xl rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm">
-              <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Bottom line</div>
-              <p className="mt-2 text-sm leading-relaxed text-zinc-800">{quickVerdict}</p>
-            </div>
-          ) : null}
+          <div className="mt-6 flex flex-wrap justify-center gap-3 text-xs text-zinc-500">
+            <span className="rounded-full bg-white px-3 py-1 ring-1 ring-zinc-200">
+              Evidence: <span className="font-semibold text-zinc-800">{competitors.length || 0}</span> competitors
+            </span>
+            <span className="rounded-full bg-white px-3 py-1 ring-1 ring-zinc-200">
+              Proof points: <span className="font-semibold text-zinc-800">{evidence.length || 0}</span> snippets
+            </span>
+            {marketPosition ? (
+              <span className="rounded-full bg-white px-3 py-1 ring-1 ring-zinc-200">
+                You currently look like: <span className="font-semibold text-zinc-800">{marketPosition}</span>
+              </span>
+            ) : null}
+          </div>
         </div>
 
-        {/* 12-col layout (Gemini-like) */}
-        <div className="grid grid-cols-12 gap-7">
-          {/* LEFT 8 cols */}
-          <div className="col-span-12 lg:col-span-8 space-y-14">
-            {/* Bento (true 12-col inside left block) */}
-            <section>
-              <div className="grid grid-cols-12 gap-5">
-                {/* Big red */}
-                <Card className="col-span-12 lg:col-span-6 bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
-                  <div className="absolute -right-12 -top-12 h-44 w-44 rounded-full bg-white/10 blur-3xl" />
-                  <div className="flex items-center gap-2 text-rose-100">
-                    <span className="rounded-full bg-white/15 p-1.5">
-                      <AlertOctagon className="h-4 w-4 text-white" />
-                    </span>
-                    <span className="text-xs font-extrabold uppercase tracking-widest">Total Annual Leak</span>
+        {/* GRID */}
+        <div className="mt-10 lg:mt-14 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+          {/* LEFT */}
+          <div className="lg:col-span-8 space-y-10">
+            {/* Leak summary cards */}
+            <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Big red card */}
+              <div className="relative overflow-hidden rounded-2xl border border-rose-200 bg-gradient-to-br from-red-700 to-rose-900 p-6 text-white shadow-xl shadow-rose-900/10">
+                <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+                <div className="relative">
+                  <div className="text-xs font-extrabold uppercase tracking-widest text-rose-100">
+                    Total annual leak
                   </div>
-
-                  <div className="mt-5 text-5xl font-extrabold tracking-tight leading-none">
+                  <div className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">
                     {moneyRange(perYearLow, perYearHigh)}
                   </div>
+                  <p className="mt-4 text-sm text-rose-50 leading-relaxed opacity-95">
+                    Your competitors are capturing this extra revenue. You are not.
+                  </p>
 
-                  <div className="mt-10">
-                    <div className="mb-2 flex items-end justify-between text-xs font-semibold text-rose-100">
-                      <span>Pricing + Offer Efficiency</span>
-                      <span className="text-white">GAP EXISTS</span>
+                  <div className="mt-8">
+                    <div className="flex items-end justify-between text-xs font-semibold text-rose-100">
+                      <span>Current efficiency</span>
+                      <span className="text-white">Gap exists</span>
                     </div>
-
-                    <div className="relative h-4 w-full overflow-hidden rounded-full bg-black/25 ring-1 ring-inset ring-white/10">
-                      <div className="absolute left-0 top-0 h-full w-[85%] rounded-l-full bg-white/80" />
-                      <div className="absolute right-0 top-0 h-full w-[15%] rounded-r-full bg-red-500" />
+                    <div className="mt-2 h-3 w-full rounded-full bg-black/25 overflow-hidden ring-1 ring-inset ring-white/10">
+                      <div className="h-full w-[85%] bg-white/80" />
                     </div>
-
-                    <p className="mt-4 flex items-start gap-2 text-sm font-medium text-rose-50/95">
-                      <TrendingDown className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>Your competitors are capturing this money. You are not.</span>
-                    </p>
+                    <div className="mt-2 text-xs text-rose-100">
+                      (Simple visual: you’re missing a slice of what the market charges.)
+                    </div>
                   </div>
-                </Card>
+                </div>
+              </div>
 
-                {/* Right stack of 2 */}
-                <div className="col-span-12 lg:col-span-6 grid grid-cols-12 gap-5">
-                  <Card className="col-span-12">
-                    <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Monthly Cash Impact</div>
-                    <div className="mt-2 text-3xl font-extrabold tracking-tight text-zinc-900">
-                      {moneyRange(finalPerMonthLow, finalPerMonthHigh)}
-                      <span className="ml-1 text-sm font-semibold text-zinc-400">/mo</span>
-                    </div>
-                    <p className="mt-2 text-sm text-zinc-600">Money you should be keeping each month.</p>
-                    <div className="mt-4 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
-                      Cost of waiting:{" "}
-                      <span className="font-extrabold text-zinc-900">{moneyRange(perWeekLow, perWeekHigh)}</span>{" "}
-                      <span className="text-zinc-500">per week</span>
-                    </div>
-                  </Card>
+              {/* Side stack */}
+              <div className="grid gap-4">
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">
+                    Monthly cash impact
+                  </div>
+                  <div className="mt-2 text-2xl font-extrabold">
+                    {moneyRange(perMonthLow, perMonthHigh)}
+                    <span className="ml-1 text-sm font-semibold text-zinc-400">/mo</span>
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Missing profit that should be landing in your account.
+                  </p>
+                </div>
 
-                  <Card className="col-span-12">
-                    <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Market Perception</div>
-                    <div className="mt-2 text-xl font-extrabold tracking-tight text-zinc-900">{perceptionLine}</div>
-                    <p className="mt-2 text-sm text-zinc-600">
-                      People hire you because you look cheaper or “good enough” — not because you look safest.
-                    </p>
-                    <div className="mt-4 text-xs text-zinc-500">
-                      Built from {competitorCount || "—"} competitors and {proofCount || "—"} proof snippets.
-                    </div>
-                  </Card>
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">
+                    Market perception
+                  </div>
+                  <div className="mt-2 text-xl font-extrabold text-zinc-900">
+                    {marketPosition || "Not clear yet"}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    If you look “cheap”, you attract price shoppers and lose the best jobs.
+                  </p>
                 </div>
               </div>
             </section>
 
-            {/* Leaks */}
+            {/* Top leaks */}
             <section>
-              <SectionHeader title="Where is the money going?" subtitle="We found the 3 biggest holes. Fix #1 first." />
+              <div className="mb-6">
+                <h3 className="text-lg font-extrabold text-zinc-900">Where the money is leaking</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  The 3 biggest holes. Fix #1 first.
+                </p>
+              </div>
 
-              <div className="space-y-6">
+              <div className="space-y-5">
                 {topLeaks.length ? (
                   topLeaks.slice(0, 3).map((leak: any, idx: number) => {
-                    const w = leakWeight(idx);
-                    const impact = finalPerMonthLow === null ? null : Math.round(finalPerMonthLow * w);
-
+                    const est = allocateLeak(perMonthLow, idx);
                     return (
-                      <div
-                        key={idx}
-                        className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
-                      >
-                        <div className="flex flex-col gap-3 border-b border-zinc-100 bg-zinc-50/60 p-6 sm:flex-row sm:items-center sm:gap-4">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-base font-extrabold text-zinc-900 shadow-sm">
-                            #{idx + 1}
-                          </div>
-
-                          <div className="min-w-0">
-                            <h4 className="text-lg font-extrabold tracking-tight text-zinc-900">
+                      <div key={idx} className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-zinc-50 px-5 py-4 border-b border-zinc-100">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-zinc-200 text-sm font-extrabold">
+                              #{idx + 1}
+                            </div>
+                            <div className="font-extrabold text-zinc-900">
                               {safeString(leak?.title, "Untitled issue")}
-                            </h4>
-                            <p className="mt-1 text-sm text-zinc-500">This drains profit until it’s fixed.</p>
+                            </div>
                           </div>
 
                           <div className="sm:ml-auto">
-                            <ImpactBadge value={moneyCompact(impact)} />
+                            <span className="inline-flex items-center rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-extrabold text-rose-700 ring-1 ring-inset ring-rose-100">
+                              Est. impact: {moneyCompact(est)}/mo
+                            </span>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-8 p-6 md:grid-cols-2">
+                        <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div>
-                            <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-rose-600">
-                              <AlertTriangle className="h-4 w-4" />
+                            <div className="text-xs font-extrabold uppercase tracking-wider text-rose-600">
                               The problem
                             </div>
-                            <p className="text-sm leading-relaxed text-zinc-800 font-medium">
+                            <p className="mt-2 text-sm text-zinc-800 leading-relaxed">
                               {safeString(leak?.why_it_matters, "—")}
                             </p>
                           </div>
 
                           <div>
-                            <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-emerald-600">
-                              <CheckCircle2 className="h-4 w-4" />
-                              What competitors do instead
+                            <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-600">
+                              What competitors do
                             </div>
-                            <p className="text-sm leading-relaxed text-zinc-700">
+                            <p className="mt-2 text-sm text-zinc-700 leading-relaxed">
                               {safeString(leak?.market_contrast, "—")}
                             </p>
                           </div>
@@ -409,265 +310,252 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     );
                   })
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
-                    No leaks were generated for this run.
+                  <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-6 text-center text-sm text-zinc-500">
+                    No leaks were generated in this run.
                   </div>
                 )}
               </div>
             </section>
 
-            {/* Offer */}
+            {/* Competitor matrix */}
             <section>
-              <SectionHeader
-                title="What to add (so you can charge more)"
-                subtitle="Simple add-ons competitors use to justify higher prices and win better customers."
-              />
-
-              {offers.length ? (
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                  {offers.slice(0, 6).map((o: any, i: number) => (
-                    <Card key={i}>
-                      <div className="text-sm font-extrabold text-zinc-900">{safeString(o?.title, "Untitled")}</div>
-                      <p className="mt-2 text-sm leading-relaxed text-zinc-600">{safeString(o?.content, "")}</p>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <Card>
-                  <div className="text-sm text-zinc-600">No offer rebuild items were generated.</div>
-                </Card>
-              )}
-            </section>
-
-            {/* Competitors table */}
-            <section>
-              <SectionHeader
-                title="Local competitor comparison"
-                subtitle="This is what customers see when they compare you. (Public info pulled from their sites.)"
-              />
+              <div className="mb-6">
+                <h3 className="text-lg font-extrabold text-zinc-900">Competitor landscape</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  This is what customers see when they compare you.
+                </p>
+              </div>
 
               <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
-                    <thead className="bg-zinc-50/80 text-xs uppercase font-extrabold text-zinc-500">
+                    <thead className="bg-zinc-50 text-xs font-extrabold uppercase tracking-wider text-zinc-500">
                       <tr>
-                        <th className="px-6 py-4">Business</th>
-                        <th className="px-6 py-4">Trip fee</th>
-                        <th className="px-6 py-4">Membership</th>
-                        <th className="px-6 py-4">Warranty</th>
+                        <th className="px-5 py-4">Business</th>
+                        <th className="px-5 py-4">Trip fee</th>
+                        <th className="px-5 py-4">Membership</th>
+                        <th className="px-5 py-4">Warranty</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100">
-                      {competitors.slice(0, 10).map((c: any, i: number) => (
-                        <tr key={i} className="hover:bg-zinc-50/60 transition">
-                          <td className="px-6 py-4 font-semibold text-zinc-900">
-                            {c?.url ? (
-                              <a
-                                href={safeString(c.url)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 hover:text-blue-700"
-                              >
-                                {safeString(c?.name, "Unknown")}
-                                <ExternalLink className="h-3 w-3 text-zinc-400" />
-                              </a>
-                            ) : (
-                              safeString(c?.name, "Unknown")
-                            )}
-                            {c?.url ? (
-                              <div className="mt-1 text-xs font-medium text-zinc-400">{shortHost(safeString(c.url))}</div>
-                            ) : null}
-                          </td>
-                          <td className="px-6 py-4 text-zinc-700">{safeString(c?.trip_fee, "—")}</td>
-                          <td className="px-6 py-4 text-zinc-700">{safeString(c?.membership_offer, "—")}</td>
-                          <td className="px-6 py-4 text-zinc-700">{safeString(c?.warranty_offer, "—")}</td>
-                        </tr>
-                      ))}
-                      {!competitors.length ? (
+                      {compRows.length ? (
+                        compRows.map((c, i) => (
+                          <tr key={i} className="hover:bg-zinc-50/60 transition">
+                            <td className="px-5 py-4 font-semibold text-zinc-900">
+                              {c.url ? (
+                                <a
+                                  href={c.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 hover:text-blue-700"
+                                >
+                                  {c.name}
+                                  <span className="text-zinc-400 text-xs">↗</span>
+                                </a>
+                              ) : (
+                                c.name
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-zinc-700">{c.trip_fee}</td>
+                            <td className="px-5 py-4 text-zinc-700">{c.membership_offer}</td>
+                            <td className="px-5 py-4 text-zinc-700">{c.warranty_offer}</td>
+                          </tr>
+                        ))
+                      ) : (
                         <tr>
-                          <td className="px-6 py-6 text-sm text-zinc-500" colSpan={4}>
+                          <td className="px-5 py-6 text-sm text-zinc-500" colSpan={4}>
                             No competitors were extracted for this run.
                           </td>
                         </tr>
-                      ) : null}
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
             </section>
 
-            {/* Evidence */}
+            {/* Evidence locker */}
             <section>
-              <SectionHeader
-                title="Verified source data"
-                subtitle={`We pulled ${proofCount} snippets from competitor pages. Open any item to verify.`}
-                right={
-                  <div className="text-xs font-semibold text-zinc-400 inline-flex items-center gap-2">
-                    <Search className="h-4 w-4" />
-                    Evidence log
-                  </div>
-                }
-              />
+              <div className="mb-6">
+                <h3 className="text-lg font-extrabold text-zinc-900">Verified source data</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  We pulled {evidence.length} proof snippets from competitor sites. No guessing.
+                </p>
+              </div>
 
               <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-                <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-6 py-3">
-                  <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Proof locker</div>
-                  <div className="text-xs text-zinc-400">Captured: {new Date().toLocaleDateString()}</div>
+                <div className="flex items-center justify-between bg-zinc-50 px-5 py-4 border-b border-zinc-200">
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">
+                    Evidence log
+                  </div>
+                  <div className="text-xs text-zinc-400">
+                    Generated: {new Date().toLocaleDateString()}
+                  </div>
                 </div>
 
                 <div className="divide-y divide-zinc-100">
                   {evidence.length ? (
                     evidence.map((e: any, i: number) => {
-                      const sourceUrl = safeString(e?.source_url, "");
-                      const label = evidenceTypeLabel(safeString(e?.type, ""));
-                      const who = inferCompetitorNameFromUrl(sourceUrl, competitors);
+                      const type = evidenceTypeLabel(safeString(e?.type, ""));
+                      const src = safeString(e?.source_url, "");
+                      const competitor = safeString(e?.competitor, "");
+                      const snippet = safeString(e?.snippet, "—");
 
                       return (
-                        <details key={i} className="group">
-                          <summary className="cursor-pointer list-none px-6 py-5 hover:bg-zinc-50/60 transition">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="inline-flex w-32 justify-center rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-extrabold text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
-                                    {label}
-                                  </span>
-                                  <span className="text-xs font-extrabold text-zinc-900">{who}</span>
-                                  <span className="text-xs text-zinc-300">•</span>
-                                  <span className="text-xs text-zinc-500 truncate max-w-[52ch]">
-                                    {shortHost(sourceUrl)}
-                                  </span>
-                                </div>
-
-                                <div className="mt-2 text-sm text-zinc-700">
-                                  “{safeString(e?.snippet, "—").replace(/\s+/g, " ").trim()}”
-                                </div>
-                              </div>
-
-                              {sourceUrl ? (
-                                <a
-                                  href={sourceUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-xs font-extrabold text-blue-700 hover:underline"
-                                >
-                                  Verify source <ExternalLink className="h-3 w-3" />
-                                </a>
-                              ) : (
-                                <span className="text-xs text-zinc-400">No source URL</span>
-                              )}
+                        <div key={i} className="p-5 hover:bg-zinc-50/50 transition">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center justify-center rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700 ring-1 ring-inset ring-zinc-200 w-24">
+                                {type}
+                              </span>
+                              {competitor ? (
+                                <span className="text-xs font-extrabold text-zinc-900">{competitor}</span>
+                              ) : null}
                             </div>
-                          </summary>
 
-                          <div className="px-6 pb-6">
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                              <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Raw snippet</div>
-                              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 font-mono">
-                                {safeString(e?.snippet, "—")}
-                              </p>
-                            </div>
+                            {src ? (
+                              <a
+                                href={src}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-semibold text-blue-700 hover:underline"
+                              >
+                                Verify source ↗
+                              </a>
+                            ) : null}
                           </div>
-                        </details>
+
+                          <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                            <p className="text-xs font-mono text-zinc-700 leading-relaxed">
+                              “{snippet}”
+                            </p>
+                          </div>
+
+                          {src ? (
+                            <div className="mt-2 text-xs text-zinc-400">
+                              {shortHost(src)}
+                            </div>
+                          ) : null}
+                        </div>
                       );
                     })
                   ) : (
-                    <div className="px-6 py-12 text-center text-sm text-zinc-500">No evidence was extracted for this run.</div>
+                    <div className="p-8 text-center text-sm text-zinc-500">
+                      No evidence logs were extracted for this run.
+                    </div>
                   )}
                 </div>
               </div>
             </section>
-
-            {doLater.length ? (
-              <section>
-                <SectionHeader title="After you fix the first 3" subtitle="Still important. Just not urgent." />
-                <Card>
-                  <ol className="list-decimal pl-5 text-sm text-zinc-700 space-y-2">
-                    {doLater.map((x, i) => (
-                      <li key={i} className="leading-relaxed">{x}</li>
-                    ))}
-                  </ol>
-                </Card>
-              </section>
-            ) : null}
           </div>
 
-          {/* RIGHT 4 cols (sticky plan) */}
-          <div className="col-span-12 lg:col-span-4">
+          {/* RIGHT (sticky) */}
+          <aside className="lg:col-span-4">
             <div className="lg:sticky lg:top-24 space-y-6">
-              <div className="rounded-2xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-blue-900">
-                <div className="mb-4 flex items-start gap-3 border-b border-white/10 pb-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10">
-                    <FileText className="h-5 w-5" />
-                  </div>
+              {/* Plan card */}
+              <div className="rounded-2xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-inset ring-blue-900">
+                <div className="flex items-center justify-between border-b border-white/10 pb-4">
                   <div>
-                    <div className="text-lg font-extrabold tracking-tight">Your Plan</div>
-                    <div className="text-xs font-semibold text-blue-200">72-hour turnaround</div>
+                    <div className="text-xs font-extrabold uppercase tracking-widest text-blue-200">
+                      Your plan
+                    </div>
+                    <div className="mt-1 text-lg font-extrabold">
+                      72-hour turnaround
+                    </div>
                   </div>
+                  <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-extrabold text-white">
+                    Start now
+                  </span>
                 </div>
 
-                <p className="mb-6 text-sm leading-relaxed text-blue-100">
-                  Stop the bleeding first. Do these 3 things this week to recover{" "}
-                  <span className="font-extrabold text-white border-b border-white/30">
-                    ~{moneyCompact(finalPerMonthLow)}/mo
+                <p className="mt-4 text-sm text-blue-100 leading-relaxed">
+                  Do these 3 things first. They usually recover{" "}
+                  <span className="font-extrabold text-white">
+                    ~{moneyCompact(perMonthLow)}
                   </span>
-                  .
+                  /mo in missed profit.
                 </p>
 
-                <ul className="space-y-4">
+                <ol className="mt-5 space-y-3">
                   {doFirst.length ? (
-                    doFirst.map((action, i) => (
-                      <li key={i} className="flex gap-3">
-                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-blue-300/50 text-[11px] font-extrabold text-blue-100">
+                    doFirst.map((a, i) => (
+                      <li key={i} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-blue-300 text-[11px] font-extrabold text-blue-100">
                           {i + 1}
                         </div>
-                        <span className="text-sm font-semibold leading-relaxed text-white">{action}</span>
+                        <div className="text-sm font-semibold text-white leading-relaxed">
+                          {a}
+                        </div>
                       </li>
                     ))
                   ) : (
                     <li className="text-sm text-blue-200">No urgent actions generated.</li>
                   )}
-                </ul>
+                </ol>
 
-                <div className="mt-8">
-                  <a
-                    href={`mailto:?subject=${emailSubject}&body=${emailBody}`}
-                    className="block w-full rounded-xl bg-white py-3 text-center text-sm font-extrabold text-blue-900 hover:bg-blue-50 transition shadow-sm"
-                  >
-                    Send This Plan To My Email
-                  </a>
-                </div>
-
-                <div className="mt-4 text-xs text-blue-200">
-                  Tip: forward this to your office manager. It’s designed to be “doable”.
+                {/* IMPORTANT: no button with onClick in Server Component */}
+                <div className="mt-6 rounded-xl bg-white/10 p-4">
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-blue-200">
+                    Tip
+                  </div>
+                  <div className="mt-1 text-sm text-blue-100 leading-relaxed">
+                    If you only do ONE thing: implement #1. It changes how customers value you.
+                  </div>
                 </div>
               </div>
 
-              <Card>
+              {/* Trust card */}
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="text-sm font-extrabold text-zinc-900">Why trust this?</div>
-                <p className="mt-2 text-sm leading-relaxed text-zinc-600">
-                  This isn’t guessing. We pulled public pricing / membership / warranty info from{" "}
-                  <span className="font-extrabold text-zinc-900">{competitorCount || "—"}</span> direct competitors and logged{" "}
-                  <span className="font-extrabold text-zinc-900">{proofCount || "—"}</span> proof snippets.
-                  This is what your market is doing right now.
+                <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
+                  This is not “AI guessing.” We collected proof from competitor websites to see what they charge and offer right now.
                 </p>
-              </Card>
 
-              <Card>
-                <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Report notes</div>
-                <div className="mt-3 text-sm text-zinc-700 space-y-2">
-                  <div>
-                    <span className="font-extrabold text-zinc-900">Confidence:</span> {confidenceMeta(confidence).label}
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-zinc-50 p-3 ring-1 ring-inset ring-zinc-200">
+                    <div className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-500">
+                      Competitors
+                    </div>
+                    <div className="mt-1 text-lg font-extrabold text-zinc-900">
+                      {competitors.length || 0}
+                    </div>
                   </div>
-                  <div>
-                    <span className="font-extrabold text-zinc-900">Market position:</span> {marketPosition || "Not detected"}
-                  </div>
-                  <div className="text-xs text-zinc-500">
-                    Numbers are ranges (not fake precision). Ranges help you act fast without gambling.
+
+                  <div className="rounded-xl bg-zinc-50 p-3 ring-1 ring-inset ring-zinc-200">
+                    <div className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-500">
+                      Proof points
+                    </div>
+                    <div className="mt-1 text-lg font-extrabold text-zinc-900">
+                      {evidence.length || 0}
+                    </div>
                   </div>
                 </div>
-              </Card>
+
+                <div className="mt-4 text-xs text-zinc-400">
+                  Report for: <span className="text-zinc-600 font-semibold">{shortHost(site)}</span>
+                </div>
+              </div>
+
+              {/* Optional next steps */}
+              {doLater.length ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                  <div className="text-sm font-extrabold text-zinc-900">Next steps (after the first 72 hours)</div>
+                  <ul className="mt-3 space-y-2 text-sm text-zinc-700">
+                    {doLater.slice(0, 6).map((x, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="text-zinc-400">•</span>
+                        <span className="leading-relaxed">{x}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
-          </div>
+          </aside>
         </div>
+
+        {/* Footer spacing */}
+        <div className="h-10" />
       </main>
     </div>
   );
