@@ -217,7 +217,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const competitorCount = competitors.length;
   const proofCount = evidence.length;
 
-  // “Cost of delay”
+  // Cost of delay
   const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
   const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
 
@@ -230,8 +230,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const perceptionLine =
     marketPosition || "Unclear positioning (customers can’t quickly tell why you cost more).";
 
-  // IMPORTANT: Server components cannot use onClick/alert.
-  // We'll render a mailto link instead (works now; you can wire real email later).
+  // Server-safe email: mailto link only
   const emailSubject = encodeURIComponent(`ProfitAudit plan for ${headerCaseHost || "your business"}`);
   const emailBody = encodeURIComponent(
     `Here are the 3 actions to do this week:\n\n${doFirst.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\n— ProfitAudit`
@@ -354,9 +353,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
 
                 <Card>
                   <div className="text-xs font-extrabold uppercase tracking-wider text-zinc-500">Market Perception</div>
-                  <div className="mt-2 text-xl font-extrabold tracking-tight text-zinc-900">
-                    {perceptionLine}
-                  </div>
+                  <div className="mt-2 text-xl font-extrabold tracking-tight text-zinc-900">{perceptionLine}</div>
                   <p className="mt-2 text-sm text-zinc-600">
                     People hire you because you look cheaper or “good enough” — not because you look safest.
                   </p>
@@ -564,7 +561,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
                                   target="_blank"
                                   rel="noreferrer"
                                   className="inline-flex items-center gap-1 text-xs font-extrabold text-blue-700 hover:underline"
-                                  onClick={(ev) => ev.stopPropagation()}
                                 >
                                   Verify source <ExternalLink className="h-3 w-3" />
                                 </a>
