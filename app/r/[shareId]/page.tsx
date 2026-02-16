@@ -176,6 +176,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
             This is profit you’re losing because of weak pricing, missing offers, and unclear guarantees — compared to the businesses around you.
           </p>
 
+          {/* Pills */}
           <div className="mt-6 flex flex-wrap justify-center gap-3 text-xs text-zinc-500">
             <span className="rounded-full bg-white px-3 py-1 ring-1 ring-zinc-200">
               Evidence: <span className="font-semibold text-zinc-800">{competitors.length || 0}</span> competitors
@@ -183,11 +184,8 @@ export default async function ReportPage({ params }: { params: { shareId: string
             <span className="rounded-full bg-white px-3 py-1 ring-1 ring-zinc-200">
               Proof points: <span className="font-semibold text-zinc-800">{evidence.length || 0}</span> snippets
             </span>
-            {marketPosition ? (
-              <span className="rounded-full bg-white px-3 py-1 ring-1 ring-zinc-200">
-                You currently look like: <span className="font-semibold text-zinc-800">{marketPosition}</span>
-              </span>
-            ) : null}
+
+            {/* REMOVED: "You currently look like: marketPosition" pill */}
           </div>
         </div>
 
@@ -317,6 +315,31 @@ export default async function ReportPage({ params }: { params: { shareId: string
               </div>
             </section>
 
+            {/* Offer rebuild */}
+            <section>
+              <div className="mb-6">
+                <h3 className="text-lg font-extrabold text-zinc-900">What to add to your offer</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Quick upgrades that let you charge more and win better customers.
+                </p>
+              </div>
+
+              {offers.length ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {offers.slice(0, 4).map((o: any, i: number) => (
+                    <div key={i} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                      <div className="text-sm font-extrabold text-zinc-900">{safeString(o?.title, "Untitled")}</div>
+                      <p className="mt-2 text-sm text-zinc-700 leading-relaxed">{safeString(o?.content, "")}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-6 text-center text-sm text-zinc-500">
+                  No offer upgrades were generated in this run.
+                </div>
+              )}
+            </section>
+
             {/* Competitor matrix */}
             <section>
               <div className="mb-6">
@@ -441,7 +464,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                     })
                   ) : (
                     <div className="p-8 text-center text-sm text-zinc-500">
-                      No evidence logs were extracted for this run.
+                      No evidence logs were extracted in this run.
                     </div>
                   )}
                 </div>
@@ -493,7 +516,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
                   )}
                 </ol>
 
-                {/* IMPORTANT: no button with onClick in Server Component */}
                 <div className="mt-6 rounded-xl bg-white/10 p-4">
                   <div className="text-xs font-extrabold uppercase tracking-wider text-blue-200">
                     Tip
@@ -554,7 +576,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
           </aside>
         </div>
 
-        {/* Footer spacing */}
         <div className="h-10" />
       </main>
     </div>
