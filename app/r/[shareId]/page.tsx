@@ -97,17 +97,18 @@ function evidenceTypeLabel(t: string) {
   return "Other";
 }
 
-// Honest allocation for “impact badge” (NOT pretending precision)
 function leakWeight(idx: number) {
   const weights = [0.45, 0.35, 0.2];
   return weights[idx] ?? 0.15;
 }
 
-// Try to guess competitor name for a piece of evidence (best-effort, safe)
 function inferCompetitorNameFromUrl(sourceUrl: string, competitors: any[]) {
   const host = shortHost(sourceUrl);
   if (!host) return "Source";
-  const match = competitors.find((c) => shortHost(safeString(c?.url, "")) && host.includes(shortHost(safeString(c?.url, ""))));
+  const match = competitors.find((c) => {
+    const cu = shortHost(safeString(c?.url, ""));
+    return cu && host.includes(cu);
+  });
   if (match?.name) return safeString(match.name, "Source");
   return host;
 }
@@ -205,8 +206,10 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const perMonthHigh = num(leakObj?.per_month_high ?? leakObj?.monthly_high);
 
   // Derive yearly if missing
-  const perYearLow = num(leakObj?.per_year_low ?? leakObj?.yearly_low) ?? (perMonthLow !== null ? perMonthLow * 12 : null);
-  const perYearHigh = num(leakObj?.per_year_high ?? leakObj?.yearly_high) ?? (perMonthHigh !== null ? perMonthHigh * 12 : null);
+  const perYearLow =
+    num(leakObj?.per_year_low ?? leakObj?.yearly_low) ?? (perMonthLow !== null ? perMonthLow * 12 : null);
+  const perYearHigh =
+    num(leakObj?.per_year_high ?? leakObj?.yearly_high) ?? (perMonthHigh !== null ? perMonthHigh * 12 : null);
 
   const finalPerMonthLow = perMonthLow ?? perMonthHigh;
   const finalPerMonthHigh = perMonthHigh ?? perMonthLow;
@@ -214,26 +217,29 @@ export default async function ReportPage({ params }: { params: { shareId: string
   const competitorCount = competitors.length;
   const proofCount = evidence.length;
 
-  // “Cost of delay” (simple framing)
+  // “Cost of delay”
   const perWeekLow = finalPerMonthLow === null ? null : finalPerMonthLow / 4;
   const perWeekHigh = finalPerMonthHigh === null ? null : finalPerMonthHigh / 4;
 
-  const headerCaseHost = shortHost(reportRow.case.websiteUrl);
-  const headerLocation = safeString(reportRow.case.location, "");
+  const headerCaseHost = shortHost(reportRow.case?.websiteUrl ?? "");
+  const headerLocation = safeString(reportRow.case?.location, "");
 
   const heroSubtitle =
     "This is profit slipping away because your pricing and offer look weaker than what customers see from local competitors.";
 
-  const perceptionLine = marketPosition
-    ? marketPosition
-    : "Unclear positioning (customers can’t quickly tell why you cost more).";
+  const perceptionLine =
+    marketPosition || "Unclear positioning (customers can’t quickly tell why you cost more).";
 
-  // -----------------------------
-  // Render
-  // -----------------------------
+  // IMPORTANT: Server components cannot use onClick/alert.
+  // We'll render a mailto link instead (works now; you can wire real email later).
+  const emailSubject = encodeURIComponent(`ProfitAudit plan for ${headerCaseHost || "your business"}`);
+  const emailBody = encodeURIComponent(
+    `Here are the 3 actions to do this week:\n\n${doFirst.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\n— ProfitAudit`
+  );
+
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      {/* Navbar (wide + responsive) */}
+      {/* Navbar */}
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-10">
           <div className="flex h-16 items-center justify-between gap-4">
@@ -270,17 +276,15 @@ export default async function ReportPage({ params }: { params: { shareId: string
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12 lg:px-10">
-        {/* HERO (centered, not narrow) */}
+        {/* HERO */}
         <div className="mx-auto mb-10 max-w-5xl text-center">
           <div className="inline-flex items-center justify-center rounded-full bg-rose-50 px-3 py-1 text-xs font-extrabold tracking-wide text-rose-700 ring-1 ring-inset ring-rose-100">
-            AUDIT COMPLETE FOR {safeString(reportRow.case.websiteUrl, "").toUpperCase()}
+            AUDIT COMPLETE FOR {safeString(reportRow.case?.websiteUrl, "").toUpperCase()}
           </div>
 
           <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-zinc-900 sm:text-5xl lg:text-6xl leading-[1.05]">
             You are leaking{" "}
-            <span className="bg-yellow-200 px-2 py-1">
-              {moneyRange(perYearLow, perYearHigh)}
-            </span>{" "}
+            <span className="bg-yellow-200 px-2 py-1">{moneyRange(perYearLow, perYearHigh)}</span>{" "}
             every single year.
           </h1>
 
@@ -296,14 +300,13 @@ export default async function ReportPage({ params }: { params: { shareId: string
           ) : null}
         </div>
 
-        {/* Main grid: left content + sticky plan */}
+        {/* Main grid */}
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-8">
-          {/* LEFT (wider content) */}
+          {/* LEFT */}
           <div className="lg:col-span-8 space-y-12">
-            {/* Leak summary bento */}
+            {/* Bento */}
             <section>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {/* Big red card spans nicely on large screens */}
                 <Card className="sm:col-span-2 xl:col-span-1 bg-gradient-to-br from-red-700 to-rose-900 text-white border-red-800 shadow-2xl shadow-rose-900/20 relative overflow-hidden ring-1 ring-inset ring-white/10">
                   <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
                   <div className="flex items-center gap-2 text-rose-100">
@@ -364,12 +367,9 @@ export default async function ReportPage({ params }: { params: { shareId: string
               </div>
             </section>
 
-            {/* Top leaks */}
+            {/* Leaks */}
             <section>
-              <SectionHeader
-                title="Where is the money going?"
-                subtitle="We found the 3 biggest holes. Fix #1 first."
-              />
+              <SectionHeader title="Where is the money going?" subtitle="We found the 3 biggest holes. Fix #1 first." />
 
               <div className="space-y-6">
                 {topLeaks.length ? (
@@ -382,7 +382,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
                         key={idx}
                         className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md hover:border-zinc-300"
                       >
-                        {/* Header */}
                         <div className="flex flex-col gap-3 border-b border-zinc-100 bg-zinc-50/60 p-5 sm:flex-row sm:items-center sm:gap-4 sm:p-6">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-white text-base font-extrabold text-zinc-900 shadow-sm">
                             #{idx + 1}
@@ -392,9 +391,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                             <h4 className="text-lg font-extrabold tracking-tight text-zinc-900">
                               {safeString(leak?.title, "Untitled issue")}
                             </h4>
-                            <p className="mt-1 text-sm text-zinc-500">
-                              This is costing you profit every month until it’s fixed.
-                            </p>
+                            <p className="mt-1 text-sm text-zinc-500">This keeps draining profit until it’s fixed.</p>
                           </div>
 
                           <div className="sm:ml-auto">
@@ -402,7 +399,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
                           </div>
                         </div>
 
-                        {/* Body */}
                         <div className="grid grid-cols-1 gap-6 p-5 sm:p-6 md:grid-cols-2 md:gap-10">
                           <div>
                             <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-rose-600">
@@ -435,11 +431,11 @@ export default async function ReportPage({ params }: { params: { shareId: string
               </div>
             </section>
 
-            {/* Offer rebuild */}
+            {/* Offer */}
             <section>
               <SectionHeader
                 title="What to add (so you can charge more)"
-                subtitle="These are simple, proven “add-ons” that help competitors justify higher prices and win better customers."
+                subtitle="Simple, proven add-ons that help competitors justify higher prices and win better customers."
               />
 
               {offers.length ? (
@@ -458,7 +454,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
               )}
             </section>
 
-            {/* Competitor table */}
+            {/* Competitors */}
             <section>
               <SectionHeader
                 title="Local competitor comparison"
@@ -515,26 +511,22 @@ export default async function ReportPage({ params }: { params: { shareId: string
               </div>
             </section>
 
-            {/* Evidence locker */}
+            {/* Evidence */}
             <section>
               <SectionHeader
                 title="Verified source data"
-                subtitle={`We pulled ${proofCount} specific snippets from competitor pages. Open any item to verify.`}
+                subtitle={`We pulled ${proofCount} snippets from competitor pages. Open any item to verify.`}
                 right={
-                  <div className="text-xs font-semibold text-zinc-400">
-                    <span className="inline-flex items-center gap-2">
-                      <Search className="h-4 w-4" />
-                      Evidence log
-                    </span>
+                  <div className="text-xs font-semibold text-zinc-400 inline-flex items-center gap-2">
+                    <Search className="h-4 w-4" />
+                    Evidence log
                   </div>
                 }
               />
 
               <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-6 py-3">
-                  <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">
-                    Proof locker
-                  </div>
+                  <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Proof locker</div>
                   <div className="text-xs text-zinc-400">Captured: {new Date().toLocaleDateString()}</div>
                 </div>
 
@@ -551,7 +543,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="inline-flex w-28 justify-center rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-extrabold text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
+                                  <span className="inline-flex w-32 justify-center rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-extrabold text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
                                     {label}
                                   </span>
                                   <span className="text-xs font-extrabold text-zinc-900">{who}</span>
@@ -584,9 +576,7 @@ export default async function ReportPage({ params }: { params: { shareId: string
 
                           <div className="px-6 pb-6">
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                              <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">
-                                Raw snippet
-                              </div>
+                              <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Raw snippet</div>
                               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 font-mono">
                                 {safeString(e?.snippet, "—")}
                               </p>
@@ -596,21 +586,15 @@ export default async function ReportPage({ params }: { params: { shareId: string
                       );
                     })
                   ) : (
-                    <div className="px-6 py-10 text-center text-sm text-zinc-500">
-                      No evidence was extracted for this run.
-                    </div>
+                    <div className="px-6 py-10 text-center text-sm text-zinc-500">No evidence was extracted for this run.</div>
                   )}
                 </div>
               </div>
             </section>
 
-            {/* “Later” actions (optional, keeps page useful) */}
             {doLater.length ? (
               <section>
-                <SectionHeader
-                  title="After you fix the first 3"
-                  subtitle="These are the next moves (still important, just not urgent)."
-                />
+                <SectionHeader title="After you fix the first 3" subtitle="Still important. Just not urgent." />
                 <Card>
                   <ol className="list-decimal pl-5 text-sm text-zinc-700 space-y-2">
                     {doLater.map((x, i) => (
@@ -622,10 +606,9 @@ export default async function ReportPage({ params }: { params: { shareId: string
             ) : null}
           </div>
 
-          {/* RIGHT (sticky plan) */}
+          {/* RIGHT */}
           <div className="lg:col-span-4">
             <div className="lg:sticky lg:top-24 space-y-6">
-              {/* Plan card */}
               <div className="rounded-2xl bg-blue-900 p-6 text-white shadow-xl ring-1 ring-blue-900">
                 <div className="mb-4 flex items-start gap-3 border-b border-white/10 pb-4">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
@@ -660,19 +643,13 @@ export default async function ReportPage({ params }: { params: { shareId: string
                   )}
                 </ul>
 
-                {/* Keep CTA but make it non-breaking (no mock behavior) */}
                 <div className="mt-8">
-                  <button
-                    type="button"
-                    className="w-full rounded-xl bg-white py-3 text-sm font-extrabold text-blue-900 hover:bg-blue-50 transition shadow-sm"
-                    onClick={() => {
-                      // Placeholder: wire to your email flow later.
-                      // This won't break SSR builds and won't show mock data.
-                      alert("Email flow not connected yet. (We’ll wire this next.)");
-                    }}
+                  <a
+                    href={`mailto:?subject=${emailSubject}&body=${emailBody}`}
+                    className="block w-full rounded-xl bg-white py-3 text-center text-sm font-extrabold text-blue-900 hover:bg-blue-50 transition shadow-sm"
                   >
                     Send This Plan To My Email
-                  </button>
+                  </a>
                 </div>
 
                 <div className="mt-4 text-xs text-blue-200">
@@ -680,7 +657,6 @@ export default async function ReportPage({ params }: { params: { shareId: string
                 </div>
               </div>
 
-              {/* Trust card */}
               <Card>
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100">
@@ -698,20 +674,17 @@ export default async function ReportPage({ params }: { params: { shareId: string
                 </div>
               </Card>
 
-              {/* Quick context (keeps it “official”) */}
               <Card>
                 <div className="text-xs font-extrabold uppercase tracking-wide text-zinc-500">Report notes</div>
                 <div className="mt-2 text-sm text-zinc-700 space-y-2">
                   <div>
-                    <span className="font-extrabold text-zinc-900">Confidence:</span>{" "}
-                    {confidenceMeta(confidence).label}
+                    <span className="font-extrabold text-zinc-900">Confidence:</span> {confidenceMeta(confidence).label}
                   </div>
                   <div>
-                    <span className="font-extrabold text-zinc-900">Market position:</span>{" "}
-                    {marketPosition || "Not detected"}
+                    <span className="font-extrabold text-zinc-900">Market position:</span> {marketPosition || "Not detected"}
                   </div>
                   <div className="text-xs text-zinc-500">
-                    Numbers are ranges (not fantasy precision). We use ranges so you can act safely and fast.
+                    Numbers are ranges (not fake precision). Ranges help you act fast without gambling.
                   </div>
                 </div>
               </Card>
