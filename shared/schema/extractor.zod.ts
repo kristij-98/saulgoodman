@@ -30,6 +30,15 @@ export const IntakeSchema = z.object({
 
   has_membership: z.boolean().optional(),
   has_priority: z.boolean().optional(),
+  has_packages: z.boolean().optional(),
+
+  years_in_business: z.string().optional().nullable(),
+  main_services: z.string().optional().nullable(),
+  last_pricing_update: z.string().optional().nullable(),
+  main_service_price: z.string().optional().nullable(),
+  pricing_frustration: z.string().optional().nullable(),
+  pricing_list_contact: z.string().optional().nullable(),
+  known_competitors: z.string().optional().nullable(),
 });
 
 export type IntakeData = z.infer<typeof IntakeSchema>;
