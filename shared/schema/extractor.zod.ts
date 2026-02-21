@@ -4,12 +4,15 @@ import { z } from "zod";
    INTAKE SCHEMA
 ============================= */
 
-const numberFromInput = z.coerce.number();
+const numberFromInput = z.coerce.number().min(0);
 
 export const IntakeSchema = z
   .object({
     website_url: z.string().url(),
     business_address: z.string().min(8),
+    city: z.string().min(2),
+    state_province: z.string().min(2),
+    postal_code: z.string().min(2),
     what_they_sell: z.string().min(3),
 
     jobs_min: numberFromInput,
@@ -22,53 +25,44 @@ export const IntakeSchema = z
     services: z
       .array(
         z.object({
-          name: z.string(),
+          name: z.string().min(1),
           price: z.string().optional(),
         })
       )
-      .optional(),
+      .optional()
+      .default([]),
 
     trip_fee: z.string().optional(),
     warranty: z.string().optional(),
     has_membership: z.boolean().optional(),
     has_priority: z.boolean().optional(),
-    has_packages: z.boolean().optional(),
-    known_competitors: z.string().nullable().optional(),
-    pricing_problem: z.string().nullable().optional(),
+    membership_status: z.enum(["yes", "no", "not_sure"]).optional(),
 
+    has_packages: z.boolean().optional(),
     packages: z
       .array(
         z.object({
-          name: z.string(),
+          name: z.string().min(1),
           price: z.string().optional(),
           includes: z.array(z.string()).optional(),
         })
       )
-      .optional(),
+      .optional()
+      .default([]),
 
-    // Optional compatibility fields used by current onboarding/API mapping.
-    city: z.string().optional(),
-    state_province: z.string().optional(),
-    state_region: z.string().optional(),
-    postal_code: z.string().optional(),
-    street_address: z.string().nullable().optional(),
-    service_area: z.enum(["local_only", "within_10_miles", "within_25_miles", "within_50_miles", "multiple_cities"]),
-    service_area_notes: z.string().nullable().optional(),
+    known_competitors: z.string().nullable().optional(),
+    pricing_problem: z.string().nullable().optional(),
+
+    // Optional fields used by current onboarding flow.
     main_service_min: numberFromInput.optional(),
     main_service_max: numberFromInput.optional(),
     consult_fee_enabled: z.boolean().optional(),
-    consult_fee_amount: numberFromInput.nullable().optional(),
+    consult_fee_amount: z.coerce.number().min(0).nullable().optional(),
     public_pricing: z.enum(["yes", "some", "no"]).optional(),
-    packages_status: z.enum(["yes", "no", "not_sure"]).optional(),
-    packages_notes: z.string().nullable().optional(),
-    addons_status: z.enum(["yes", "no", "not_sure"]).optional(),
-    addons_notes: z.string().nullable().optional(),
-    membership_status: z.enum(["yes", "no", "not_sure"]).optional(),
-    membership_price: z.string().nullable().optional(),
-    membership_notes: z.string().nullable().optional(),
-    warranty_status: z.enum(["yes", "no", "not_sure"]).optional(),
-    warranty_notes: z.string().nullable().optional(),
+    service_area: z.enum(["local_only", "within_10_miles", "within_25_miles", "within_50_miles", "multiple_cities"]),
+    service_area_notes: z.string().nullable().optional(),
   })
+  .passthrough()
   .superRefine((data, ctx) => {
     if (data.jobs_max <= data.jobs_min) {
       ctx.addIssue({

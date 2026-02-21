@@ -16,38 +16,30 @@ type StepMeta = {
 const STEPS: StepMeta[] = [
   {
     title: 'Business basics',
-    subtitle: 'Set the market context so your benchmark is fair.',
-    fields: ['website_url', 'business_address', 'what_they_sell', 'service_area'],
+    subtitle: 'Set your market context so the benchmark is accurate.',
+    fields: ['website_url', 'what_they_sell', 'business_address', 'city', 'state_province', 'postal_code'],
   },
   {
     title: 'Services & volume',
-    subtitle: 'This helps estimate what you may be leaving on the table.',
+    subtitle: 'Estimate your volume to reveal hidden profit gaps.',
     fields: ['jobs_min', 'jobs_max', 'availability'],
   },
   {
     title: 'Pricing snapshot',
-    subtitle: 'A realistic range is enough for strong recommendations.',
-    fields: ['ticket_min', 'ticket_max', 'main_service_min', 'main_service_max', 'consult_fee_enabled', 'public_pricing'],
+    subtitle: 'A practical range is enough to find missed margin.',
+    fields: ['ticket_min', 'ticket_max'],
   },
   {
     title: 'Offer structure',
-    subtitle: 'These levers often improve profit without more leads.',
-    fields: ['packages_status', 'addons_status', 'membership_status', 'warranty_status'],
+    subtitle: 'Simple offer levers can raise profit without more leads.',
+    fields: ['has_packages'],
   },
   {
-    title: 'Confirm & run',
-    subtitle: 'Review your details, then generate the report.',
+    title: 'Final details',
+    subtitle: 'Add optional context before we generate your report.',
     fields: [],
   },
 ];
-
-const SERVICE_AREA_OPTIONS = [
-  { value: 'local_only', label: 'Local only (near me)' },
-  { value: 'within_10_miles', label: 'Within 10 miles / 15 km' },
-  { value: 'within_25_miles', label: 'Within 25 miles / 40 km' },
-  { value: 'within_50_miles', label: 'Within 50 miles / 80 km' },
-  { value: 'multiple_cities', label: 'Multiple cities / regions' },
-] as const;
 
 const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
 
@@ -55,36 +47,21 @@ const DEFAULT_INTAKE_VALUES: Partial<IntakeData> = {
   website_url: '',
   business_address: '',
   city: '',
-  state_region: '',
+  state_province: '',
   postal_code: '',
   what_they_sell: '',
-  service_area: 'local_only',
-  service_area_notes: '',
   services: [],
   jobs_min: 10,
   jobs_max: 50,
   availability: 'Same Day',
   ticket_min: 150,
   ticket_max: 500,
-  main_service_min: 500,
-  main_service_max: 2500,
-  consult_fee_enabled: false,
-  consult_fee_amount: undefined,
-  public_pricing: 'some',
   has_membership: false,
   has_priority: false,
   has_packages: false,
   packages: [],
+  trip_fee: '',
   known_competitors: '',
-  packages_status: 'not_sure',
-  packages_notes: '',
-  addons_status: 'not_sure',
-  addons_notes: '',
-  membership_status: 'not_sure',
-  membership_price: '',
-  membership_notes: '',
-  warranty_status: 'not_sure',
-  warranty_notes: '',
   pricing_problem: '',
 };
 
@@ -95,7 +72,14 @@ export default function NewAuditPage() {
   const [error, setError] = useState('');
   const [serviceDraft, setServiceDraft] = useState('');
 
-  const { register, handleSubmit, watch, setValue, trigger, formState: { errors } } = useForm<IntakeData>({
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    trigger,
+    formState: { errors },
+  } = useForm<IntakeData>({
     resolver: zodResolver(IntakeSchema),
     defaultValues: DEFAULT_INTAKE_VALUES,
   });
@@ -103,33 +87,20 @@ export default function NewAuditPage() {
   const current = STEPS[step];
   const progressLabel = `Step ${step + 1} of 5`;
 
-  const serviceArea = watch('service_area');
-  const consultFeeEnabled = watch('consult_fee_enabled');
-  const packagesStatus = watch('packages_status');
-  const addonsStatus = watch('addons_status');
-  const membershipStatus = watch('membership_status');
-  const warrantyStatus = watch('warranty_status');
   const services = watch('services') || [];
+  const hasPackages = watch('has_packages');
+  const packageRows = watch('packages') || [];
 
   const summary = useMemo(() => {
     const values = watch();
     return {
       website: values.website_url || '—',
-      businessAddress: values.business_address || '—',
-      serviceArea: SERVICE_AREA_OPTIONS.find((o) => o.value === values.service_area)?.label || '—',
-      whatTheySell: values.what_they_sell || '—',
-      jobsRange: `${values.jobs_min ?? '—'} to ${values.jobs_max ?? '—'}`,
-      bookingSpeed: values.availability || '—',
-      avgTicketRange: `${values.ticket_min ?? '—'} to ${values.ticket_max ?? '—'}`,
-      mainRange: `${values.main_service_min ?? '—'} to ${values.main_service_max ?? '—'}`,
-      consultFee: values.consult_fee_enabled ? String(values.consult_fee_amount ?? 'Yes') : 'No',
-      publicPricing: values.public_pricing || '—',
-      offerLevers: {
-        packages: values.packages_status,
-        addons: values.addons_status,
-        membership: values.membership_status,
-        warranty: values.warranty_status,
-      },
+      location: values.business_address || '—',
+      sell: values.what_they_sell || '—',
+      jobs: `${values.jobs_min ?? '—'} to ${values.jobs_max ?? '—'}`,
+      availability: values.availability || '—',
+      ticket: `${values.ticket_min ?? '—'} to ${values.ticket_max ?? '—'}`,
+      packages: values.has_packages ? 'Yes' : 'No',
     };
   }, [watch]);
 
@@ -139,19 +110,8 @@ export default function NewAuditPage() {
       return;
     }
 
-    const valid = await trigger(current.fields);
+    const valid = await trigger(current.fields as any);
     if (!valid) return;
-
-    if (step === 2 && consultFeeEnabled) {
-      const consultValid = await trigger('consult_fee_amount');
-      if (!consultValid) return;
-    }
-
-    if (step === 0 && serviceArea === 'multiple_cities') {
-      const areaValid = await trigger('service_area_notes');
-      if (!areaValid) return;
-    }
-
     setStep((s) => Math.min(s + 1, 4));
   };
 
@@ -168,6 +128,20 @@ export default function NewAuditPage() {
     setValue('services', services.filter((_, i) => i !== index), { shouldDirty: true });
   };
 
+  const addPackage = () => {
+    setValue('packages', [...packageRows, { name: '' }], { shouldDirty: true });
+  };
+
+  const updatePackage = (index: number, key: 'name' | 'price', value: string) => {
+    const next = [...packageRows];
+    next[index] = { ...next[index], [key]: value };
+    setValue('packages', next, { shouldDirty: true });
+  };
+
+  const removePackage = (index: number) => {
+    setValue('packages', packageRows.filter((_, i) => i !== index), { shouldDirty: true });
+  };
+
   const onSubmit = async (data: IntakeData) => {
     setIsSubmitting(true);
     setError('');
@@ -180,7 +154,9 @@ export default function NewAuditPage() {
       if (!caseRes.ok) throw new Error('Failed to create case');
       const caseJson = await caseRes.json();
 
-      const runRes = await fetch(`/api/cases/${caseJson.id}/run`, { method: 'POST' });
+      const runRes = await fetch(`/api/cases/${caseJson.id}/run`, {
+        method: 'POST',
+      });
       if (!runRes.ok) throw new Error('Failed to start audit');
       const runJson = await runRes.json();
 
@@ -198,7 +174,7 @@ export default function NewAuditPage() {
           <Loader2 className="w-6 h-6 animate-spin mx-auto text-zinc-700" />
           <h1 className="text-2xl font-semibold">Building your report…</h1>
           <p className="text-zinc-600">This usually takes 5–7 minutes.</p>
-          <p className="text-sm text-zinc-500">We’ll show the biggest profit gaps and what to fix first.</p>
+          <p className="text-sm text-zinc-500">We’ll benchmark you against local competitors and pull proof points.</p>
         </div>
       </div>
     );
@@ -226,31 +202,26 @@ export default function NewAuditPage() {
           <div className="px-6 md:px-8 py-6 space-y-6 pb-28">
             {step === 0 && (
               <>
-                <Field label="Business website" required helper="So we can benchmark you against the businesses customers compare you to." error={errors.website_url?.message}>
+                <Field label="Business website" required error={errors.website_url?.message}>
                   <input {...register('website_url')} className="input" placeholder="https://example.com" />
                 </Field>
-
-                <Field label="Business address" required helper="Use your main customer-facing location." error={errors.business_address?.message}>
-                  <input {...register('business_address')} className="input" placeholder="Street address, city, state, ZIP" />
-                </Field>
-
-                <Field label="What do you sell most?" required helper="Keep it simple. One line is enough." error={errors.what_they_sell?.message}>
+                <Field label="What do you sell most?" required error={errors.what_they_sell?.message}>
                   <input {...register('what_they_sell')} className="input" placeholder="Your main service or offer" />
                 </Field>
-
-                <Field label="Where do you serve customers?" helper="Keeps the comparison fair and relevant." error={errors.service_area?.message}>
-                  <Segmented
-                    value={serviceArea}
-                    onChange={(v) => setValue('service_area', v as IntakeData['service_area'], { shouldValidate: true })}
-                    options={SERVICE_AREA_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-                  />
+                <Field label="Business address" required error={errors.business_address?.message}>
+                  <input {...register('business_address')} className="input" placeholder="123 Main St, Suite 200" />
                 </Field>
-
-                {serviceArea === 'multiple_cities' && (
-                  <Field label="List the cities / regions you serve" error={errors.service_area_notes?.message}>
-                    <textarea {...register('service_area_notes')} className="input min-h-24" placeholder="City, State • City, State • Region" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="City" required error={errors.city?.message}>
+                    <input {...register('city')} className="input" placeholder="City" />
                   </Field>
-                )}
+                  <Field label="State" required error={errors.state_province?.message}>
+                    <input {...register('state_province')} className="input" placeholder="State" />
+                  </Field>
+                </div>
+                <Field label="ZIP / Postal code" required error={errors.postal_code?.message}>
+                  <input {...register('postal_code')} className="input" placeholder="ZIP / Postal code" />
+                </Field>
               </>
             )}
 
@@ -258,9 +229,13 @@ export default function NewAuditPage() {
               <>
                 <div className="space-y-2">
                   <Label>List your main services (optional)</Label>
-                  <p className="text-xs text-zinc-500">If you want cleaner recommendations, list your top services.</p>
                   <div className="flex gap-2">
-                    <input value={serviceDraft} onChange={(e) => setServiceDraft(e.target.value)} className="input" placeholder="e.g. Plumbing, Dental, Landscaping" />
+                    <input
+                      value={serviceDraft}
+                      onChange={(e) => setServiceDraft(e.target.value)}
+                      className="input"
+                      placeholder="e.g. Plumbing, Dental, Landscaping"
+                    />
                     <button type="button" onClick={addService} className="px-3 rounded-md border text-sm font-medium">
                       <Plus className="w-4 h-4" />
                     </button>
@@ -279,14 +254,14 @@ export default function NewAuditPage() {
                   )}
                 </div>
 
-                <Field label="Roughly how many jobs / appointments do you do per month?" required helper="Estimates are fine. We just need the range." error={errors.jobs_min?.message || errors.jobs_max?.message}>
+                <Field label="Roughly how many jobs / appointments do you do per month?" required error={errors.jobs_min?.message || errors.jobs_max?.message}>
                   <div className="grid grid-cols-2 gap-3">
                     <input type="number" {...register('jobs_min', { valueAsNumber: true })} className="input" placeholder="Min" />
                     <input type="number" {...register('jobs_max', { valueAsNumber: true })} className="input" placeholder="Max" />
                   </div>
                 </Field>
 
-                <Field label="How fast can customers usually get booked?" required helper="Speed changes what customers will pay." error={errors.availability?.message}>
+                <Field label="How fast can customers usually get booked?" required error={errors.availability?.message}>
                   <select {...register('availability')} className="input">
                     {AVAILABILITY_OPTIONS.map((option) => (
                       <option key={option}>{option}</option>
@@ -298,105 +273,109 @@ export default function NewAuditPage() {
 
             {step === 2 && (
               <>
-                <Field label="Average customer total (per job / visit)" required helper="What you typically collect per customer." error={errors.ticket_min?.message || errors.ticket_max?.message}>
+                <Field label="Average customer total (per job / visit)" required error={errors.ticket_min?.message || errors.ticket_max?.message}>
                   <div className="grid grid-cols-2 gap-3">
                     <input type="number" {...register('ticket_min', { valueAsNumber: true })} className="input" placeholder="Min" />
                     <input type="number" {...register('ticket_max', { valueAsNumber: true })} className="input" placeholder="Max" />
                   </div>
-                </Field>
-
-                <Field label="Price range for your main service" required helper="Used to spot underpricing and missed upgrades." error={errors.main_service_min?.message || errors.main_service_max?.message}>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="number" {...register('main_service_min', { valueAsNumber: true })} className="input" placeholder="Min" />
-                    <input type="number" {...register('main_service_max', { valueAsNumber: true })} className="input" placeholder="Max" />
-                  </div>
-                </Field>
-
-                <Field label="Do you charge a consult / assessment fee?" required helper="Helps set expectations and filter low-intent leads." error={errors.consult_fee_amount?.message}>
-                  <Segmented
-                    value={consultFeeEnabled ? 'yes' : 'no'}
-                    onChange={(v) => {
-                      const enabled = v === 'yes';
-                      setValue('consult_fee_enabled', enabled, { shouldValidate: true });
-                      if (!enabled) setValue('consult_fee_amount', undefined, { shouldValidate: true });
-                    }}
-                    options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
-                  />
-                </Field>
-
-                {consultFeeEnabled && (
-                  <Field label="Consult / assessment fee" error={errors.consult_fee_amount?.message}>
-                    <input type="number" {...register('consult_fee_amount', { valueAsNumber: true })} className="input" placeholder="Amount" />
-                  </Field>
-                )}
-
-                <Field label="Do you show prices on your website?" required helper="This affects trust and conversions." error={errors.public_pricing?.message}>
-                  <Segmented
-                    value={watch('public_pricing')}
-                    onChange={(v) => setValue('public_pricing', v as IntakeData['public_pricing'], { shouldValidate: true })}
-                    options={[{ label: 'Yes', value: 'yes' }, { label: 'Some', value: 'some' }, { label: 'No', value: 'no' }]}
-                  />
                 </Field>
               </>
             )}
 
             {step === 3 && (
               <>
-                <Field label="Do you offer packages or bundles?" required helper="Packages often raise profit per customer." error={errors.packages_status?.message}>
-                  <Segmented value={packagesStatus} onChange={(v) => setValue('packages_status', v as IntakeData['packages_status'], { shouldValidate: true })} options={statusOptions()} />
+                <Field label="Do you offer packages or bundles?" required error={errors.has_packages?.message}>
+                  <Segmented
+                    value={hasPackages ? 'yes' : 'no'}
+                    onChange={(v) => {
+                      const enabled = v === 'yes';
+                      setValue('has_packages', enabled, { shouldValidate: true });
+                      if (!enabled) setValue('packages', [], { shouldValidate: true });
+                    }}
+                    options={[
+                      { label: 'Yes', value: 'yes' },
+                      { label: 'No', value: 'no' },
+                    ]}
+                  />
                 </Field>
-                {packagesStatus === 'yes' && (
-                  <Field label="List your packages (optional)">
-                    <textarea {...register('packages_notes')} className="input min-h-24" placeholder="Package name + what’s included" />
-                  </Field>
-                )}
 
-                <Field label="Do you offer add-ons or upgrades?" required helper="Add-ons are often high-margin." error={errors.addons_status?.message}>
-                  <Segmented value={addonsStatus} onChange={(v) => setValue('addons_status', v as IntakeData['addons_status'], { shouldValidate: true })} options={statusOptions()} />
-                </Field>
-                {addonsStatus === 'yes' && (
-                  <Field label="List your add-ons (optional)">
-                    <textarea {...register('addons_notes')} className="input min-h-24" placeholder="Add-on name + price (if you want)" />
-                  </Field>
-                )}
+                {hasPackages && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label>Packages</Label>
+                      <button type="button" onClick={addPackage} className="px-3 py-1 rounded-md border text-sm">
+                        Add package
+                      </button>
+                    </div>
 
-                <Field label="Do you have a membership / subscription?" required helper="Recurring revenue stabilizes your month." error={errors.membership_status?.message}>
-                  <Segmented value={membershipStatus} onChange={(v) => setValue('membership_status', v as IntakeData['membership_status'], { shouldValidate: true })} options={statusOptions()} />
-                </Field>
-                {membershipStatus === 'yes' && (
-                  <div className="grid gap-4">
-                    <Field label="Membership price">
-                      <input {...register('membership_price')} className="input" placeholder="Price" />
-                    </Field>
-                    <Field label="What’s included? (optional)">
-                      <textarea {...register('membership_notes')} className="input min-h-20" placeholder="What members get" />
-                    </Field>
+                    {packageRows.map((pkg, idx) => (
+                      <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+                        <input
+                          className="input"
+                          placeholder="Package name"
+                          value={pkg.name || ''}
+                          onChange={(e) => updatePackage(idx, 'name', e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Price (optional)"
+                          value={pkg.price || ''}
+                          onChange={(e) => updatePackage(idx, 'price', e.target.value)}
+                        />
+                        <button type="button" onClick={() => removePackage(idx)} className="btn-secondary">
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                <Field label="Do you offer a guarantee / warranty?" required helper="A clear promise supports premium pricing." error={errors.warranty_status?.message}>
-                  <Segmented value={warrantyStatus} onChange={(v) => setValue('warranty_status', v as IntakeData['warranty_status'], { shouldValidate: true })} options={statusOptions()} />
+                <Field label="Diagnostic / Trip fee (optional)">
+                  <input {...register('trip_fee')} className="input" placeholder="Optional amount" />
                 </Field>
-                {warrantyStatus === 'yes' && (
-                  <Field label="Describe it (optional)">
-                    <textarea {...register('warranty_notes')} className="input min-h-20" placeholder="Short description" />
-                  </Field>
-                )}
 
-                <Field label="What’s the biggest pricing problem right now? (optional)" helper="This helps tailor your recommendations.">
-                  <textarea {...register('pricing_problem')} className="input min-h-24" placeholder="Short note" />
-                </Field>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
+                    <input type="checkbox" {...register('has_membership')} className="h-4 w-4" /> We offer a membership
+                  </label>
+                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
+                    <input type="checkbox" {...register('has_priority')} className="h-4 w-4" /> We offer priority service
+                  </label>
+                </div>
               </>
             )}
 
             {step === 4 && (
-              <div className="space-y-4">
-                <ReviewCard title="Market setup" rows={[['Website', summary.website], ['Business address', summary.businessAddress], ['Service area', summary.serviceArea]]} />
-                <ReviewCard title="What you sell most" rows={[['Main offer', summary.whatTheySell]]} />
-                <ReviewCard title="Volume" rows={[['Jobs/month range', summary.jobsRange], ['Booking speed', summary.bookingSpeed]]} />
-                <ReviewCard title="Pricing" rows={[['Avg ticket range', summary.avgTicketRange], ['Main service price range', summary.mainRange], ['Consult fee', summary.consultFee], ['Public pricing', summary.publicPricing]]} />
-                <ReviewCard title="Offer levers" rows={[['Packages', prettyStatus(summary.offerLevers.packages)], ['Add-ons', prettyStatus(summary.offerLevers.addons)], ['Membership', prettyStatus(summary.offerLevers.membership)], ['Guarantee', prettyStatus(summary.offerLevers.warranty)]]} />
-              </div>
+              <>
+                <ReviewCard
+                  title="Review"
+                  rows={[
+                    ['Website', summary.website],
+                    ['Address', summary.location],
+                    ['Main offer', summary.sell],
+                    ['Jobs/month', summary.jobs],
+                    ['Booking speed', summary.availability],
+                    ['Ticket range', summary.ticket],
+                    ['Packages', summary.packages],
+                  ]}
+                />
+
+                <Field label="Known competitors (optional)">
+                  <textarea
+                    {...register('known_competitors')}
+                    className="input min-h-24"
+                    placeholder="Names or links (optional)"
+                  />
+                </Field>
+
+                <Field label="Pricing notes (optional)">
+                  <textarea
+                    {...register('pricing_problem')}
+                    className="input min-h-24"
+                    placeholder="Anything else we should consider"
+                  />
+                </Field>
+              </>
             )}
 
             {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -426,20 +405,6 @@ export default function NewAuditPage() {
   );
 }
 
-function statusOptions() {
-  return [
-    { label: 'Yes', value: 'yes' },
-    { label: 'No', value: 'no' },
-    { label: 'Not sure', value: 'not_sure' },
-  ];
-}
-
-function prettyStatus(v?: string) {
-  if (v === 'yes') return 'Yes';
-  if (v === 'no') return 'No';
-  return 'Not sure';
-}
-
 function Segmented({ value, onChange, options }: { value?: string; onChange: (next: string) => void; options: { label: string; value: string }[] }) {
   return (
     <div className="grid gap-2 sm:grid-cols-2">
@@ -448,7 +413,9 @@ function Segmented({ value, onChange, options }: { value?: string; onChange: (ne
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`rounded-md border px-3 py-2 text-sm text-left transition-colors ${value === opt.value ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-300 hover:border-zinc-400'}`}
+          className={`rounded-md border px-3 py-2 text-sm text-left transition-colors ${
+            value === opt.value ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-300 hover:border-zinc-400'
+          }`}
         >
           {opt.label}
         </button>
@@ -461,14 +428,13 @@ function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-sm font-medium text-zinc-900">{children}</label>;
 }
 
-function Field({ label, required, helper, error, children }: { label: string; required?: boolean; helper?: string; error?: string; children: React.ReactNode }) {
+function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <Label>
         {label} {required && <span className="text-zinc-500">(Required)</span>}
       </Label>
       {children}
-      {helper && <p className="text-xs text-zinc-500">{helper}</p>}
       {error && <p className="text-xs text-rose-600">{error}</p>}
     </div>
   );
