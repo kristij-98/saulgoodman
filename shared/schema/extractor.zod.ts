@@ -1,19 +1,15 @@
 import { z } from "zod";
 
-/* =============================
-   INTAKE SCHEMA
-============================= */
-
 const numberFromInput = z.coerce.number().min(0);
 
 export const IntakeSchema = z
   .object({
     website_url: z.string().url(),
+    what_they_sell: z.string().min(3),
     business_address: z.string().min(8),
     city: z.string().min(2),
     state_province: z.string().min(2),
     postal_code: z.string().min(2),
-    what_they_sell: z.string().min(3),
 
     jobs_min: numberFromInput,
     jobs_max: numberFromInput,
@@ -21,6 +17,9 @@ export const IntakeSchema = z
     ticket_max: numberFromInput,
 
     availability: z.enum(["Same Day", "Next Day", "2-3 Days", "1 Week+"]),
+
+    service_area: z.enum(["local_only", "within_10_miles", "within_25_miles", "within_50_miles", "multiple_cities"]),
+    service_area_notes: z.string().nullable().optional(),
 
     services: z
       .array(
@@ -32,13 +31,19 @@ export const IntakeSchema = z
       .optional()
       .default([]),
 
+    consult_fee_enabled: z.boolean().optional(),
+    consult_fee_amount: z.coerce.number().min(0).nullable().optional(),
+    public_pricing: z.enum(["yes", "some", "no"]).optional(),
+
+    main_service_min: numberFromInput.optional(),
+    main_service_max: numberFromInput.optional(),
+
     trip_fee: z.string().optional(),
     warranty: z.string().optional(),
     has_membership: z.boolean().optional(),
     has_priority: z.boolean().optional(),
-    membership_status: z.enum(["yes", "no", "not_sure"]).optional(),
 
-    has_packages: z.boolean().optional(),
+    packages_status: z.enum(["yes", "no", "not_sure"]).optional(),
     packages: z
       .array(
         z.object({
@@ -50,19 +55,20 @@ export const IntakeSchema = z
       .optional()
       .default([]),
 
-    known_competitors: z.string().nullable().optional(),
-    pricing_problem: z.string().nullable().optional(),
+    addons_status: z.enum(["yes", "no", "not_sure"]).optional(),
+    addons_notes: z.string().nullable().optional(),
 
-    // Optional fields used by current onboarding flow.
-    main_service_min: numberFromInput.optional(),
-    main_service_max: numberFromInput.optional(),
-    consult_fee_enabled: z.boolean().optional(),
-    consult_fee_amount: z.coerce.number().min(0).nullable().optional(),
-    public_pricing: z.enum(["yes", "some", "no"]).optional(),
-    service_area: z.enum(["local_only", "within_10_miles", "within_25_miles", "within_50_miles", "multiple_cities"]),
-    service_area_notes: z.string().nullable().optional(),
+    membership_status: z.enum(["yes", "no", "not_sure"]).optional(),
+    membership_price: z.string().nullable().optional(),
+    membership_notes: z.string().nullable().optional(),
+
+    warranty_status: z.enum(["yes", "no", "not_sure"]).optional(),
+    warranty_notes: z.string().nullable().optional(),
+
+    pricing_problem: z.string().nullable().optional(),
+    known_competitors: z.string().nullable().optional(),
   })
-  .passthrough()
+  .catchall(z.any())
   .superRefine((data, ctx) => {
     if (data.jobs_max <= data.jobs_min) {
       ctx.addIssue({
@@ -79,13 +85,37 @@ export const IntakeSchema = z
         message: "Max must be higher than Min.",
       });
     }
+
+    if (
+      typeof data.main_service_min === "number" &&
+      typeof data.main_service_max === "number" &&
+      data.main_service_max <= data.main_service_min
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["main_service_max"],
+        message: "Max must be higher than Min.",
+      });
+    }
+
+    if (data.service_area === "multiple_cities" && !data.service_area_notes?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["service_area_notes"],
+        message: "This field is required.",
+      });
+    }
+
+    if (data.consult_fee_enabled && typeof data.consult_fee_amount !== "number") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["consult_fee_amount"],
+        message: "This field is required.",
+      });
+    }
   });
 
 export type IntakeData = z.infer<typeof IntakeSchema>;
-
-/* =============================
-   EXTRACTOR SCHEMAS
-============================= */
 
 const EvidenceTypeSchema = z.enum(["pricing", "service", "reputation", "guarantee", "other"]);
 

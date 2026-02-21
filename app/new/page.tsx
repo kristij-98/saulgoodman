@@ -13,6 +13,15 @@ type StepMeta = {
   fields: (keyof IntakeData)[];
 };
 
+const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
+const SERVICE_AREA_OPTIONS = [
+  { label: 'Local only (near me)', value: 'local_only' },
+  { label: 'Within 10 miles / 15 km', value: 'within_10_miles' },
+  { label: 'Within 25 miles / 40 km', value: 'within_25_miles' },
+  { label: 'Within 50 miles / 80 km', value: 'within_50_miles' },
+  { label: 'Multiple cities / regions', value: 'multiple_cities' },
+] as const;
+
 const STEPS: StepMeta[] = [
   {
     title: 'Business basics',
@@ -22,17 +31,17 @@ const STEPS: StepMeta[] = [
   {
     title: 'Services & volume',
     subtitle: 'Estimate your volume to reveal hidden profit gaps.',
-    fields: ['jobs_min', 'jobs_max', 'availability'],
+    fields: ['jobs_min', 'jobs_max', 'availability', 'service_area', 'service_area_notes'],
   },
   {
     title: 'Pricing snapshot',
     subtitle: 'A practical range is enough to find missed margin.',
-    fields: ['ticket_min', 'ticket_max'],
+    fields: ['ticket_min', 'ticket_max', 'public_pricing', 'consult_fee_enabled', 'consult_fee_amount'],
   },
   {
     title: 'Offer structure',
     subtitle: 'Simple offer levers can raise profit without more leads.',
-    fields: ['has_packages'],
+    fields: ['packages_status', 'addons_status', 'membership_status', 'warranty_status'],
   },
   {
     title: 'Final details',
@@ -41,86 +50,115 @@ const STEPS: StepMeta[] = [
   },
 ];
 
-const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
-
 const DEFAULT_INTAKE_VALUES: Partial<IntakeData> = {
   website_url: '',
+  what_they_sell: '',
   business_address: '',
   city: '',
   state_province: '',
   postal_code: '',
-  what_they_sell: '',
-  services: [],
+
   jobs_min: 10,
   jobs_max: 50,
-  availability: 'Same Day',
   ticket_min: 150,
   ticket_max: 500,
+
+  availability: 'Same Day',
+  service_area: 'local_only',
+  service_area_notes: '',
+
+  services: [],
+  consult_fee_enabled: false,
+  consult_fee_amount: undefined,
+  public_pricing: 'some',
+
+  packages_status: 'not_sure',
+  packages: [],
+  addons_status: 'not_sure',
+  addons_notes: '',
+  membership_status: 'not_sure',
+  membership_price: '',
+  membership_notes: '',
+  warranty_status: 'not_sure',
+  warranty_notes: '',
+
+  has_packages: false,
   has_membership: false,
   has_priority: false,
-  has_packages: false,
-  packages: [],
   trip_fee: '',
-  known_competitors: '',
   pricing_problem: '',
+  known_competitors: '',
 };
 
 export default function NewAuditPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [serviceDraft, setServiceDraft] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [serviceDraft, setServiceDraft] = useState('');
 
   const {
     register,
     handleSubmit,
+    trigger,
     watch,
     setValue,
-    trigger,
     formState: { errors },
   } = useForm<IntakeData>({
     resolver: zodResolver(IntakeSchema),
     defaultValues: DEFAULT_INTAKE_VALUES,
   });
 
-  const current = STEPS[step];
-  const progressLabel = `Step ${step + 1} of 5`;
-
+  const currentStep = STEPS[step];
   const services = watch('services') || [];
-  const hasPackages = watch('has_packages');
-  const packageRows = watch('packages') || [];
+  const serviceArea = watch('service_area');
+  const consultFeeEnabled = watch('consult_fee_enabled');
+  const packagesStatus = watch('packages_status');
+  const packages = watch('packages') || [];
+  const addonsStatus = watch('addons_status');
+  const membershipStatus = watch('membership_status');
+  const warrantyStatus = watch('warranty_status');
 
   const summary = useMemo(() => {
-    const values = watch();
+    const v = watch();
     return {
-      website: values.website_url || '—',
-      location: values.business_address || '—',
-      sell: values.what_they_sell || '—',
-      jobs: `${values.jobs_min ?? '—'} to ${values.jobs_max ?? '—'}`,
-      availability: values.availability || '—',
-      ticket: `${values.ticket_min ?? '—'} to ${values.ticket_max ?? '—'}`,
-      packages: values.has_packages ? 'Yes' : 'No',
+      website: v.website_url || '—',
+      offer: v.what_they_sell || '—',
+      location: `${v.business_address || '—'} · ${v.city || '—'}, ${v.state_province || '—'} ${v.postal_code || '—'}`,
+      volume: `${v.jobs_min ?? '—'} to ${v.jobs_max ?? '—'} / month`,
+      speed: v.availability || '—',
+      pricing: `${v.ticket_min ?? '—'} to ${v.ticket_max ?? '—'}`,
+      packages: v.packages_status || 'not_sure',
     };
   }, [watch]);
 
-  const nextStep = async () => {
-    if (!current.fields.length) {
-      setStep((s) => Math.min(s + 1, 4));
-      return;
+  const goNext = async () => {
+    const fields = [...currentStep.fields];
+
+    if (step === 1 && serviceArea !== 'multiple_cities') {
+      const idx = fields.indexOf('service_area_notes');
+      if (idx >= 0) fields.splice(idx, 1);
     }
 
-    const valid = await trigger(current.fields as any);
-    if (!valid) return;
+    if (step === 2 && !consultFeeEnabled) {
+      const idx = fields.indexOf('consult_fee_amount');
+      if (idx >= 0) fields.splice(idx, 1);
+    }
+
+    if (fields.length > 0) {
+      const valid = await trigger(fields as any);
+      if (!valid) return;
+    }
+
     setStep((s) => Math.min(s + 1, 4));
   };
 
-  const backStep = () => setStep((s) => Math.max(s - 1, 0));
+  const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   const addService = () => {
-    const clean = serviceDraft.trim();
-    if (!clean) return;
-    setValue('services', [...services, { name: clean }], { shouldDirty: true });
+    const value = serviceDraft.trim();
+    if (!value) return;
+    setValue('services', [...services, { name: value }], { shouldDirty: true });
     setServiceDraft('');
   };
 
@@ -129,17 +167,17 @@ export default function NewAuditPage() {
   };
 
   const addPackage = () => {
-    setValue('packages', [...packageRows, { name: '' }], { shouldDirty: true });
+    setValue('packages', [...packages, { name: '' }], { shouldDirty: true });
   };
 
   const updatePackage = (index: number, key: 'name' | 'price', value: string) => {
-    const next = [...packageRows];
+    const next = [...packages];
     next[index] = { ...next[index], [key]: value };
     setValue('packages', next, { shouldDirty: true });
   };
 
   const removePackage = (index: number) => {
-    setValue('packages', packageRows.filter((_, i) => i !== index), { shouldDirty: true });
+    setValue('packages', packages.filter((_, i) => i !== index), { shouldDirty: true });
   };
 
   const onSubmit = async (data: IntakeData) => {
@@ -162,8 +200,8 @@ export default function NewAuditPage() {
 
       router.push(`/status/${runJson.jobId}`);
     } catch {
-      setError('Something went wrong. Please try again.');
       setIsSubmitting(false);
+      setError('Something went wrong. Please try again.');
     }
   };
 
@@ -190,13 +228,13 @@ export default function NewAuditPage() {
 
         <form onSubmit={handleSubmit(onSubmit)} className="rounded-2xl border bg-white shadow-sm overflow-hidden">
           <div className="px-6 md:px-8 py-6 border-b bg-zinc-50/60 space-y-2">
-            <div className="text-sm font-medium text-zinc-800">{progressLabel}</div>
+            <div className="text-sm font-medium text-zinc-800">Step {step + 1} of 5</div>
             <div className="text-xs text-zinc-500">Quick + honest answers = a sharper report.</div>
             <div className="h-1.5 w-full bg-zinc-200 rounded-full overflow-hidden">
               <div className="h-full bg-zinc-900" style={{ width: `${((step + 1) / 5) * 100}%` }} />
             </div>
-            <h2 className="pt-2 text-xl font-semibold text-zinc-900">{current.title}</h2>
-            <p className="text-sm text-zinc-600">{current.subtitle}</p>
+            <h2 className="pt-2 text-xl font-semibold text-zinc-900">{currentStep.title}</h2>
+            <p className="text-sm text-zinc-600">{currentStep.subtitle}</p>
           </div>
 
           <div className="px-6 md:px-8 py-6 space-y-6 pb-28">
@@ -205,20 +243,25 @@ export default function NewAuditPage() {
                 <Field label="Business website" required error={errors.website_url?.message}>
                   <input {...register('website_url')} className="input" placeholder="https://example.com" />
                 </Field>
+
                 <Field label="What do you sell most?" required error={errors.what_they_sell?.message}>
                   <input {...register('what_they_sell')} className="input" placeholder="Your main service or offer" />
                 </Field>
+
                 <Field label="Business address" required error={errors.business_address?.message}>
                   <input {...register('business_address')} className="input" placeholder="123 Main St, Suite 200" />
                 </Field>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="City" required error={errors.city?.message}>
                     <input {...register('city')} className="input" placeholder="City" />
                   </Field>
+
                   <Field label="State" required error={errors.state_province?.message}>
                     <input {...register('state_province')} className="input" placeholder="State" />
                   </Field>
                 </div>
+
                 <Field label="ZIP / Postal code" required error={errors.postal_code?.message}>
                   <input {...register('postal_code')} className="input" placeholder="ZIP / Postal code" />
                 </Field>
@@ -240,6 +283,7 @@ export default function NewAuditPage() {
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
+
                   {!!services.length && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {services.map((svc, idx) => (
@@ -268,6 +312,20 @@ export default function NewAuditPage() {
                     ))}
                   </select>
                 </Field>
+
+                <Field label="Service area" error={errors.service_area?.message}>
+                  <Segmented
+                    value={serviceArea}
+                    onChange={(v) => setValue('service_area', v as IntakeData['service_area'], { shouldValidate: true })}
+                    options={SERVICE_AREA_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
+                  />
+                </Field>
+
+                {serviceArea === 'multiple_cities' && (
+                  <Field label="List the cities / regions you serve" required error={errors.service_area_notes?.message}>
+                    <textarea {...register('service_area_notes')} className="input min-h-24" placeholder="City, State • City, State • Region" />
+                  </Field>
+                )}
               </>
             )}
 
@@ -279,27 +337,50 @@ export default function NewAuditPage() {
                     <input type="number" {...register('ticket_max', { valueAsNumber: true })} className="input" placeholder="Max" />
                   </div>
                 </Field>
+
+                <Field label="Do you show prices on your website?" error={errors.public_pricing?.message}>
+                  <Segmented
+                    value={watch('public_pricing')}
+                    onChange={(v) => setValue('public_pricing', v as IntakeData['public_pricing'], { shouldValidate: true })}
+                    options={[{ label: 'Yes', value: 'yes' }, { label: 'Some', value: 'some' }, { label: 'No', value: 'no' }]}
+                  />
+                </Field>
+
+                <Field label="Do you charge a consult / assessment fee?" error={errors.consult_fee_amount?.message}>
+                  <Segmented
+                    value={consultFeeEnabled ? 'yes' : 'no'}
+                    onChange={(v) => {
+                      const enabled = v === 'yes';
+                      setValue('consult_fee_enabled', enabled, { shouldValidate: true });
+                      if (!enabled) setValue('consult_fee_amount', undefined, { shouldValidate: true });
+                    }}
+                    options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
+                  />
+                </Field>
+
+                {consultFeeEnabled && (
+                  <Field label="Consult / assessment fee" required error={errors.consult_fee_amount?.message}>
+                    <input type="number" {...register('consult_fee_amount', { valueAsNumber: true })} className="input" placeholder="Amount" />
+                  </Field>
+                )}
               </>
             )}
 
             {step === 3 && (
               <>
-                <Field label="Do you offer packages or bundles?" required error={errors.has_packages?.message}>
+                <Field label="Do you offer packages or bundles?" required error={errors.packages_status?.message}>
                   <Segmented
-                    value={hasPackages ? 'yes' : 'no'}
+                    value={watch('packages_status')}
                     onChange={(v) => {
-                      const enabled = v === 'yes';
-                      setValue('has_packages', enabled, { shouldValidate: true });
-                      if (!enabled) setValue('packages', [], { shouldValidate: true });
+                      setValue('packages_status', v as IntakeData['packages_status'], { shouldValidate: true });
+                      setValue('has_packages', v === 'yes', { shouldValidate: true });
+                      if (v !== 'yes') setValue('packages', [], { shouldValidate: true });
                     }}
-                    options={[
-                      { label: 'Yes', value: 'yes' },
-                      { label: 'No', value: 'no' },
-                    ]}
+                    options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }, { label: 'Not sure', value: 'not_sure' }]}
                   />
                 </Field>
 
-                {hasPackages && (
+                {packagesStatus === 'yes' && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <Label>Packages</Label>
@@ -308,7 +389,7 @@ export default function NewAuditPage() {
                       </button>
                     </div>
 
-                    {packageRows.map((pkg, idx) => (
+                    {packages.map((pkg, idx) => (
                       <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
                         <input
                           className="input"
@@ -330,18 +411,52 @@ export default function NewAuditPage() {
                   </div>
                 )}
 
-                <Field label="Diagnostic / Trip fee (optional)">
-                  <input {...register('trip_fee')} className="input" placeholder="Optional amount" />
+                <Field label="Do you offer add-ons or upgrades?" required error={errors.addons_status?.message}>
+                  <Segmented
+                    value={watch('addons_status')}
+                    onChange={(v) => setValue('addons_status', v as IntakeData['addons_status'], { shouldValidate: true })}
+                    options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }, { label: 'Not sure', value: 'not_sure' }]}
+                  />
                 </Field>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
-                    <input type="checkbox" {...register('has_membership')} className="h-4 w-4" /> We offer a membership
-                  </label>
-                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
-                    <input type="checkbox" {...register('has_priority')} className="h-4 w-4" /> We offer priority service
-                  </label>
-                </div>
+                {addonsStatus === 'yes' && (
+                  <Field label="Add-ons notes (optional)">
+                    <textarea {...register('addons_notes')} className="input min-h-24" placeholder="Add-on name + price (optional)" />
+                  </Field>
+                )}
+
+                <Field label="Do you have a membership / subscription?" required error={errors.membership_status?.message}>
+                  <Segmented
+                    value={watch('membership_status')}
+                    onChange={(v) => setValue('membership_status', v as IntakeData['membership_status'], { shouldValidate: true })}
+                    options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }, { label: 'Not sure', value: 'not_sure' }]}
+                  />
+                </Field>
+
+                {membershipStatus === 'yes' && (
+                  <>
+                    <Field label="Membership price (optional)">
+                      <input {...register('membership_price')} className="input" placeholder="Monthly amount" />
+                    </Field>
+                    <Field label="Membership notes (optional)">
+                      <textarea {...register('membership_notes')} className="input min-h-24" placeholder="What members get" />
+                    </Field>
+                  </>
+                )}
+
+                <Field label="Do you offer a guarantee / warranty?" required error={errors.warranty_status?.message}>
+                  <Segmented
+                    value={watch('warranty_status')}
+                    onChange={(v) => setValue('warranty_status', v as IntakeData['warranty_status'], { shouldValidate: true })}
+                    options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }, { label: 'Not sure', value: 'not_sure' }]}
+                  />
+                </Field>
+
+                {warrantyStatus === 'yes' && (
+                  <Field label="Warranty notes (optional)">
+                    <textarea {...register('warranty_notes')} className="input min-h-24" placeholder="Short description" />
+                  </Field>
+                )}
               </>
             )}
 
@@ -351,29 +466,21 @@ export default function NewAuditPage() {
                   title="Review"
                   rows={[
                     ['Website', summary.website],
-                    ['Address', summary.location],
-                    ['Main offer', summary.sell],
-                    ['Jobs/month', summary.jobs],
-                    ['Booking speed', summary.availability],
-                    ['Ticket range', summary.ticket],
+                    ['Main offer', summary.offer],
+                    ['Location', summary.location],
+                    ['Jobs/month', summary.volume],
+                    ['Booking speed', summary.speed],
+                    ['Ticket range', summary.pricing],
                     ['Packages', summary.packages],
                   ]}
                 />
 
-                <Field label="Known competitors (optional)">
-                  <textarea
-                    {...register('known_competitors')}
-                    className="input min-h-24"
-                    placeholder="Names or links (optional)"
-                  />
+                <Field label="Biggest pricing problem (optional)">
+                  <textarea {...register('pricing_problem')} className="input min-h-24" placeholder="Tell us what feels hardest right now" />
                 </Field>
 
-                <Field label="Pricing notes (optional)">
-                  <textarea
-                    {...register('pricing_problem')}
-                    className="input min-h-24"
-                    placeholder="Anything else we should consider"
-                  />
+                <Field label="Known competitors (optional)">
+                  <textarea {...register('known_competitors')} className="input min-h-24" placeholder="Names or links (optional)" />
                 </Field>
               </>
             )}
@@ -382,12 +489,12 @@ export default function NewAuditPage() {
           </div>
 
           <div className="sticky bottom-0 border-t bg-white px-6 md:px-8 py-4 flex items-center justify-between">
-            <button type="button" onClick={backStep} disabled={step === 0} className="btn-secondary disabled:opacity-40">
+            <button type="button" onClick={goBack} disabled={step === 0} className="btn-secondary disabled:opacity-40">
               Back
             </button>
 
             {step < 4 ? (
-              <button type="button" onClick={nextStep} className="btn-primary">
+              <button type="button" onClick={goNext} className="btn-primary">
                 Next step
               </button>
             ) : (
@@ -405,7 +512,15 @@ export default function NewAuditPage() {
   );
 }
 
-function Segmented({ value, onChange, options }: { value?: string; onChange: (next: string) => void; options: { label: string; value: string }[] }) {
+function Segmented({
+  value,
+  onChange,
+  options,
+}: {
+  value?: string;
+  onChange: (next: string) => void;
+  options: { label: string; value: string }[];
+}) {
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       {options.map((opt) => (
@@ -428,7 +543,17 @@ function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-sm font-medium text-zinc-900">{children}</label>;
 }
 
-function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  error,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
       <Label>
