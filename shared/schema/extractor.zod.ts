@@ -33,8 +33,18 @@ export const IntakeSchema = z
 
     services: z.array(z.string()).optional().default([]),
 
-    jobs_min: requiredNumber,
-    jobs_max: requiredNumber,
+  has_membership: z.boolean().optional(),
+  has_priority: z.boolean().optional(),
+  has_packages: z.boolean().optional(),
+
+  years_in_business: z.string().optional().nullable(),
+  main_services: z.string().optional().nullable(),
+  last_pricing_update: z.string().optional().nullable(),
+  main_service_price: z.string().optional().nullable(),
+  pricing_frustration: z.string().optional().nullable(),
+  pricing_list_contact: z.string().optional().nullable(),
+  known_competitors: z.string().optional().nullable(),
+});
 
     availability: z.enum(["Same day", "Next day", "2–3 days", "1 week+"]),
 
