@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+const requiredText = "This field is required.";
+const invalidUrlText = "Please enter a valid website link.";
+const numberText = "Please enter a number.";
+const rangeText = "Max must be higher than Min.";
+
 /* =============================
    INTAKE SCHEMA
 ============================= */
@@ -18,7 +23,7 @@ export const IntakeSchema = z.object({
   ticket_min: numberFromInput,
   ticket_max: numberFromInput,
 
-  availability: z.enum(["Same Day", "Next Day", "2-3 Days", "1 Week+"]),
+    what_they_sell: z.string().min(1, requiredText),
 
   services: z
     .array(
@@ -71,7 +76,24 @@ export const IntakeSchema = z.object({
   pricing_problem: z.string().nullable().optional(),
 });
 
-export type IntakeData = z.infer<typeof IntakeSchema>;
+    availability: z.enum(["Same day", "Next day", "2–3 days", "1 week+"]),
+
+    ticket_min: requiredNumber,
+    ticket_max: requiredNumber,
+
+    main_service_min: requiredNumber,
+    main_service_max: requiredNumber,
+
+    consult_fee_enabled: z.boolean(),
+    consult_fee_amount: z.coerce.number({ invalid_type_error: numberText }).optional().nullable(),
+
+    public_pricing: z.enum(["yes", "some", "no"]),
+
+    packages_status: z.enum(["yes", "no", "not_sure"]),
+    packages_notes: z.string().optional().nullable(),
+
+    addons_status: z.enum(["yes", "no", "not_sure"]),
+    addons_notes: z.string().optional().nullable(),
 
 /* =============================
    EXTRACTOR SCHEMAS

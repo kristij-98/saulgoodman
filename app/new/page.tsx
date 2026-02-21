@@ -209,6 +209,9 @@ export default function NewAuditPage() {
       const caseJson = await caseRes.json();
 
       const runRes = await fetch(`/api/cases/${caseJson.id}/run`, { method: 'POST' });
+      const runRes = await fetch(`/api/cases/${caseJson.id}/run`, {
+        method: 'POST',
+      });
       if (!runRes.ok) throw new Error('Failed to start audit');
       const runJson = await runRes.json();
 
@@ -228,6 +231,24 @@ export default function NewAuditPage() {
           <p className="text-zinc-600">This usually takes 5–7 minutes.</p>
           <p className="text-sm text-zinc-500">We’ll show the biggest profit gaps and what to fix first.</p>
         </div>
+  return (
+    <div className="max-w-3xl mx-auto py-10 px-4 space-y-8">
+      <div className="space-y-3 text-center">
+        <h1 className="text-3xl font-bold tracking-tight">Profit Audit Survey</h1>
+        <p className="text-sm text-zinc-600">A guided intake to build your competitive pricing audit.</p>
+      </div>
+    );
+  }
+
+      <div className="rounded-xl border bg-white p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between text-xs text-zinc-500">
+          <span>{stepMeta.title}</span>
+          <span>{step + 1}/{SURVEY_STEPS.length}</span>
+        </div>
+        <div className="h-2 w-full rounded-full bg-zinc-100 overflow-hidden">
+          <div className="h-full bg-slate-900 transition-all duration-300" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="text-sm text-zinc-600">{stepMeta.description}</p>
       </div>
     );
   }
@@ -250,6 +271,7 @@ export default function NewAuditPage() {
             <h2 className="pt-2 text-xl font-semibold text-zinc-900">{current.title}</h2>
             <p className="text-sm text-zinc-600">{current.subtitle}</p>
           </div>
+        )}
 
           <div className="px-6 md:px-8 py-6 space-y-6 pb-28">
             {step === 0 && (
