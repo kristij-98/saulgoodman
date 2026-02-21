@@ -48,8 +48,8 @@ export default function StatusPage({ params }: { params: { jobId: string } }) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold">Auditing your market...</h2>
-        <p className="text-muted-foreground">This usually takes about 30-60 seconds.</p>
+        <h2 className="text-2xl font-bold">Building your report…</h2>
+        <p className="text-muted-foreground">This usually takes 5–7 minutes.</p>
       </div>
 
       <div className="w-full max-w-md bg-white rounded-xl border p-8 space-y-6 shadow-sm">
