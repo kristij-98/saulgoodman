@@ -15,6 +15,14 @@ type StepMeta = {
 
 const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
 
+const SERVICE_AREA_OPTIONS = [
+  { value: 'local_only', label: 'Local only (near me)' },
+  { value: 'within_10_miles', label: 'Within 10 miles / 15 km' },
+  { value: 'within_25_miles', label: 'Within 25 miles / 40 km' },
+  { value: 'within_50_miles', label: 'Within 50 miles / 80 km' },
+  { value: 'multiple_cities', label: 'Multiple cities / regions' },
+] as const;
+
 const STEP_META: StepMeta[] = [
   {
     title: 'Business basics',
@@ -24,7 +32,7 @@ const STEP_META: StepMeta[] = [
   {
     title: 'Services & volume',
     subtitle: 'A clear volume range helps expose hidden margin.',
-    fields: ['jobs_min', 'jobs_max', 'availability'],
+    fields: ['jobs_min', 'jobs_max', 'availability', 'service_area'],
   },
   {
     title: 'Pricing snapshot',
@@ -46,23 +54,44 @@ const STEP_META: StepMeta[] = [
 const DEFAULT_VALUES: Partial<IntakeData> = {
   website_url: '',
   what_they_sell: '',
+
   street_address: '',
   city: '',
   state_province: '',
   postal_code: '',
+
   services: [],
+
   jobs_min: 10,
   jobs_max: 50,
+
   availability: 'Same Day',
+
   ticket_min: 150,
   ticket_max: 500,
+
+  service_area: 'local_only',
+  service_area_notes: '',
+
+  public_pricing: 'some',
+  consult_fee_enabled: false,
+  consult_fee_amount: undefined,
+
+  packages_status: 'not_sure',
+  addons_status: 'not_sure',
+  membership_status: 'not_sure',
+  warranty_status: 'not_sure',
+
   trip_fee: '',
   has_packages: false,
   packages: [],
+
   has_membership: false,
   has_priority: false,
+
   warranty: '',
-  pricing_frustration: '',
+
+  pricing_problem: '',
   known_competitors: '',
 };
 
@@ -85,10 +114,11 @@ export default function NewAuditPage() {
     defaultValues: DEFAULT_VALUES,
   });
 
-  // ✅ Explicitly type watch() outputs so TS never infers any/unknown
+  // Strict TS: explicitly type watched arrays so callbacks never infer any
   const services = (watch('services') ?? []) as Array<{ name: string; price?: string }>;
   const packages = (watch('packages') ?? []) as Array<{ name: string; price?: string; includes?: string[] }>;
   const hasPackages = Boolean(watch('has_packages'));
+  const serviceArea = watch('service_area');
 
   const progress = useMemo(() => ((step + 1) / STEP_META.length) * 100, [step]);
   const current = STEP_META[step];
@@ -138,14 +168,19 @@ export default function NewAuditPage() {
 
   const goNext = async () => {
     const fields = [...current.fields];
+
+    // service_area_notes required only when multiple_cities
+    if (step === 1 && serviceArea === 'multiple_cities') {
+      fields.push('service_area_notes' as any);
+    }
+
     const valid = fields.length ? await trigger(fields as any) : true;
     if (!valid) return;
+
     setStep((s) => Math.min(s + 1, STEP_META.length - 1));
   };
 
-  const goBack = () => {
-    setStep((s) => Math.max(s - 1, 0));
-  };
+  const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   const onSubmit = async (data: IntakeData) => {
     setError('');
@@ -267,11 +302,7 @@ export default function NewAuditPage() {
                   )}
                 </div>
 
-                <Field
-                  label="Roughly how many jobs / appointments do you do per month?"
-                  required
-                  error={errors.jobs_min?.message || errors.jobs_max?.message}
-                >
+                <Field label="Roughly how many jobs / appointments do you do per month?" required error={errors.jobs_min?.message || errors.jobs_max?.message}>
                   <div className="grid grid-cols-2 gap-3">
                     <input type="number" {...register('jobs_min', { valueAsNumber: true })} className="input" placeholder="Min" />
                     <input type="number" {...register('jobs_max', { valueAsNumber: true })} className="input" placeholder="Max" />
@@ -287,16 +318,32 @@ export default function NewAuditPage() {
                     ))}
                   </select>
                 </Field>
+
+                <Field label="Where do you serve customers?" required error={(errors as any).service_area?.message}>
+                  <select {...register('service_area')} className="input">
+                    {SERVICE_AREA_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                {serviceArea === 'multiple_cities' && (
+                  <Field label="List the cities / regions you serve" required error={(errors as any).service_area_notes?.message}>
+                    <textarea
+                      {...register('service_area_notes')}
+                      className="input min-h-24"
+                      placeholder="City, State • City, State • Region"
+                    />
+                  </Field>
+                )}
               </>
             )}
 
             {step === 2 && (
               <>
-                <Field
-                  label="Average customer total (per job / visit)"
-                  required
-                  error={errors.ticket_min?.message || errors.ticket_max?.message}
-                >
+                <Field label="Average customer total (per job / visit)" required error={errors.ticket_min?.message || errors.ticket_max?.message}>
                   <div className="grid grid-cols-2 gap-3">
                     <input type="number" {...register('ticket_min', { valueAsNumber: true })} className="input" placeholder="Min" />
                     <input type="number" {...register('ticket_max', { valueAsNumber: true })} className="input" placeholder="Max" />
@@ -374,8 +421,12 @@ export default function NewAuditPage() {
 
             {step === 4 && (
               <>
-                <Field label="What is your biggest pricing frustration? (optional)" error={errors.pricing_frustration?.message}>
-                  <textarea {...register('pricing_frustration')} className="input min-h-24" placeholder="Tell us what feels hardest right now" />
+                <Field label="What’s the biggest pricing problem right now? (optional)" error={(errors as any).pricing_problem?.message}>
+                  <textarea
+                    {...register('pricing_problem')}
+                    className="input min-h-24"
+                    placeholder="Example: Busy, but margins feel thin."
+                  />
                 </Field>
 
                 <Field label="Known competitors (optional)" error={errors.known_competitors?.message}>
@@ -392,7 +443,7 @@ export default function NewAuditPage() {
               Back
             </button>
 
-            {step < 4 ? (
+            {step < STEP_META.length - 1 ? (
               <button type="button" onClick={goNext} className="btn-primary">
                 Next step
               </button>
