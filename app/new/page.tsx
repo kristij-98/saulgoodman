@@ -13,89 +13,57 @@ type StepMeta = {
   fields: (keyof IntakeData)[];
 };
 
-const STEPS: StepMeta[] = [
+const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
+
+const STEP_META: StepMeta[] = [
   {
     title: 'Business basics',
-    subtitle: 'This sets your market context so the benchmark is accurate.',
-    fields: ['website_url', 'city', 'state_province', 'postal_code', 'what_they_sell', 'service_area'],
+    subtitle: 'Set your market context so your report is sharp and fair.',
+    fields: ['website_url', 'what_they_sell', 'street_address', 'city', 'state_province', 'postal_code'],
   },
   {
     title: 'Services & volume',
-    subtitle: 'This helps estimate what you’re leaving on the table.',
+    subtitle: 'A clear volume range helps expose hidden margin.',
     fields: ['jobs_min', 'jobs_max', 'availability'],
   },
   {
     title: 'Pricing snapshot',
-    subtitle: 'Don’t overthink it. A realistic range is enough.',
-    fields: [
-      'ticket_min',
-      'ticket_max',
-      'main_service_min',
-      'main_service_max',
-      'consult_fee_enabled',
-      'public_pricing',
-      'consult_fee_amount',
-    ],
+    subtitle: 'Simple, honest numbers are enough.',
+    fields: ['ticket_min', 'ticket_max'],
   },
   {
     title: 'Offer structure',
-    subtitle: 'These levers increase profit without more leads.',
-    fields: ['packages_status', 'addons_status', 'membership_status', 'warranty_status'],
+    subtitle: 'These levers usually move profit fast.',
+    fields: ['has_packages'],
   },
   {
-    title: 'Confirm & run',
-    subtitle: 'You’ll get a clear report with priorities and next steps.',
+    title: 'Final notes',
+    subtitle: 'Optional details to tighten recommendations.',
     fields: [],
   },
 ];
 
-const SERVICE_AREA_OPTIONS = [
-  { value: 'local_only', label: 'Local only (near me)' },
-  { value: 'within_10_miles', label: 'Within 10 miles / 15 km' },
-  { value: 'within_25_miles', label: 'Within 25 miles / 40 km' },
-  { value: 'within_50_miles', label: 'Within 50 miles / 80 km' },
-  { value: 'multiple_cities', label: 'Multiple cities / regions' },
-] as const;
-
-const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
-
-const DEFAULT_INTAKE_VALUES: Partial<IntakeData> = {
+const DEFAULT_VALUES: Partial<IntakeData> = {
   website_url: '',
-  business_address: '',
+  what_they_sell: '',
+  street_address: '',
   city: '',
   state_province: '',
-  state_region: '',
   postal_code: '',
-  street_address: '',
-  what_they_sell: '',
-  service_area: 'local_only',
-  service_area_notes: '',
   services: [],
-  jobs_min: 40,
-  jobs_max: 120,
-  availability: 'Next Day',
+  jobs_min: 10,
+  jobs_max: 50,
+  availability: 'Same Day',
   ticket_min: 150,
   ticket_max: 500,
-  main_service_min: 500,
-  main_service_max: 2500,
-  consult_fee_enabled: false,
-  consult_fee_amount: undefined,
-  public_pricing: 'some',
-  has_membership: false,
-  has_priority: false,
+  trip_fee: '',
   has_packages: false,
   packages: [],
+  has_membership: false,
+  has_priority: false,
+  warranty: '',
+  pricing_frustration: '',
   known_competitors: '',
-  packages_status: 'not_sure',
-  packages_notes: '',
-  addons_status: 'not_sure',
-  addons_notes: '',
-  membership_status: 'not_sure',
-  membership_price: '',
-  membership_notes: '',
-  warranty_status: 'not_sure',
-  warranty_notes: '',
-  pricing_problem: '',
 };
 
 export default function NewAuditPage() {
@@ -114,72 +82,15 @@ export default function NewAuditPage() {
     formState: { errors },
   } = useForm<IntakeData>({
     resolver: zodResolver(IntakeSchema),
-    defaultValues: DEFAULT_INTAKE_VALUES,
+    defaultValues: DEFAULT_VALUES,
   });
 
-  const current = STEPS[step];
-  const progressLabel = `Step ${step + 1} of 5`;
+  const services = watch('services') || [];
+  const hasPackages = !!watch('has_packages');
+  const packages = watch('packages') || [];
 
-  const serviceArea = watch('service_area');
-  const consultFeeEnabled = watch('consult_fee_enabled');
-  const packagesStatus = watch('packages_status');
-  const addonsStatus = watch('addons_status');
-  const membershipStatus = watch('membership_status');
-  const warrantyStatus = watch('warranty_status');
-  const services = (watch('services') as { name: string; price?: string }[] | undefined) || [];
-
-
-  const summary = useMemo(() => {
-    const values = watch();
-    return {
-      website: values.website_url || '—',
-      location: `${values.city || '—'}, ${values.state_province || values.state_region || '—'} ${values.postal_code || '—'}`,
-      serviceArea:
-        SERVICE_AREA_OPTIONS.find((o) => o.value === values.service_area)?.label || '—',
-      whatTheySell: values.what_they_sell || '—',
-      jobsRange: `${values.jobs_min ?? '—'} to ${values.jobs_max ?? '—'}`,
-      bookingSpeed: values.availability || '—',
-      avgTicketRange: `${values.ticket_min ?? '—'} to ${values.ticket_max ?? '—'}`,
-      mainRange: `${values.main_service_min ?? '—'} to ${values.main_service_max ?? '—'}`,
-      consultFee:
-        values.consult_fee_enabled
-          ? values.consult_fee_amount != null
-            ? String(values.consult_fee_amount)
-            : 'Yes'
-          : 'No',
-      publicPricing: values.public_pricing || '—',
-      offerLevers: {
-        packages: values.packages_status,
-        addons: values.addons_status,
-        membership: values.membership_status,
-        warranty: values.warranty_status,
-      },
-    };
-  }, [watch]);
-
-  const nextStep = async () => {
-    if (!current.fields.length) {
-      setStep((s) => Math.min(s + 1, 4));
-      return;
-    }
-
-    const valid = await trigger(current.fields);
-    if (!valid) return;
-
-    if (step === 2 && consultFeeEnabled) {
-      const consultValid = await trigger('consult_fee_amount');
-      if (!consultValid) return;
-    }
-
-    if (step === 0 && serviceArea === 'multiple_cities') {
-      const areaValid = await trigger('service_area_notes');
-      if (!areaValid) return;
-    }
-
-    setStep((s) => Math.min(s + 1, 4));
-  };
-
-  const backStep = () => setStep((s) => Math.max(s - 1, 0));
+  const progress = useMemo(() => ((step + 1) / STEP_META.length) * 100, [step]);
+  const current = STEP_META[step];
 
   const addService = () => {
     const clean = serviceDraft.trim();
@@ -196,27 +107,67 @@ export default function NewAuditPage() {
     );
   };
 
+  const addPackage = () => {
+    setValue('packages', [...packages, { name: '', price: '', includes: [] }], { shouldDirty: true });
+  };
+
+  const removePackage = (index: number) => {
+    setValue(
+      'packages',
+      packages.filter((_, i) => i !== index),
+      { shouldDirty: true }
+    );
+  };
+
+  const updatePackageField = (index: number, key: 'name' | 'price', value: string) => {
+    const next = [...packages];
+    next[index] = { ...next[index], [key]: value };
+    setValue('packages', next, { shouldDirty: true });
+  };
+
+  const updatePackageIncludes = (index: number, value: string) => {
+    const next = [...packages];
+    const includes = value
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    next[index] = { ...next[index], includes };
+    setValue('packages', next, { shouldDirty: true });
+  };
+
+  const goNext = async () => {
+    const fields = [...current.fields];
+    const valid = fields.length ? await trigger(fields as any) : true;
+    if (!valid) return;
+    setStep((s) => Math.min(s + 1, STEP_META.length - 1));
+  };
+
+  const goBack = () => {
+    setStep((s) => Math.max(s - 1, 0));
+  };
+
   const onSubmit = async (data: IntakeData) => {
-    setIsSubmitting(true);
     setError('');
+    setIsSubmitting(true);
 
     try {
       const caseRes = await fetch('/api/cases', {
         method: 'POST',
         body: JSON.stringify(data),
       });
+
       if (!caseRes.ok) throw new Error('Failed to create case');
       const caseJson = await caseRes.json();
 
-      const runRes = await fetch(`/api/cases/${caseJson.id}/run`, { method: 'POST' });
       const runRes = await fetch(`/api/cases/${caseJson.id}/run`, {
         method: 'POST',
       });
-      if (!runRes.ok) throw new Error('Failed to start audit');
+
+      if (!runRes.ok) throw new Error('Failed to start run');
       const runJson = await runRes.json();
 
       router.push(`/status/${runJson.jobId}`);
-    } catch (e) {
+    } catch {
       setError('Something went wrong. Please try again.');
       setIsSubmitting(false);
     }
@@ -229,26 +180,8 @@ export default function NewAuditPage() {
           <Loader2 className="w-6 h-6 animate-spin mx-auto text-zinc-700" />
           <h1 className="text-2xl font-semibold">Building your report…</h1>
           <p className="text-zinc-600">This usually takes 5–7 minutes.</p>
-          <p className="text-sm text-zinc-500">We’ll show the biggest profit gaps and what to fix first.</p>
+          <p className="text-sm text-zinc-500">Clear priorities. Real proof points. Next moves you can run this week.</p>
         </div>
-  return (
-    <div className="max-w-3xl mx-auto py-10 px-4 space-y-8">
-      <div className="space-y-3 text-center">
-        <h1 className="text-3xl font-bold tracking-tight">Profit Audit Survey</h1>
-        <p className="text-sm text-zinc-600">A guided intake to build your competitive pricing audit.</p>
-      </div>
-    );
-  }
-
-      <div className="rounded-xl border bg-white p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between text-xs text-zinc-500">
-          <span>{stepMeta.title}</span>
-          <span>{step + 1}/{SURVEY_STEPS.length}</span>
-        </div>
-        <div className="h-2 w-full rounded-full bg-zinc-100 overflow-hidden">
-          <div className="h-full bg-slate-900 transition-all duration-300" style={{ width: `${progress}%` }} />
-        </div>
-        <p className="text-sm text-zinc-600">{stepMeta.description}</p>
       </div>
     );
   }
@@ -263,91 +196,56 @@ export default function NewAuditPage() {
 
         <form onSubmit={handleSubmit(onSubmit)} className="rounded-2xl border bg-white shadow-sm overflow-hidden">
           <div className="px-6 md:px-8 py-6 border-b bg-zinc-50/60 space-y-2">
-            <div className="text-sm font-medium text-zinc-800">{progressLabel}</div>
+            <div className="text-sm font-medium text-zinc-800">Step {step + 1} of 5</div>
             <div className="text-xs text-zinc-500">Quick + honest answers = a sharper report.</div>
             <div className="h-1.5 w-full bg-zinc-200 rounded-full overflow-hidden">
-              <div className="h-full bg-zinc-900" style={{ width: `${((step + 1) / 5) * 100}%` }} />
+              <div className="h-full bg-zinc-900 transition-all" style={{ width: `${progress}%` }} />
             </div>
             <h2 className="pt-2 text-xl font-semibold text-zinc-900">{current.title}</h2>
             <p className="text-sm text-zinc-600">{current.subtitle}</p>
           </div>
-        )}
 
           <div className="px-6 md:px-8 py-6 space-y-6 pb-28">
             {step === 0 && (
               <>
-                <Field label="Business website" required helper="So your report matches what customers see online." error={errors.website_url?.message}>
-                  <input {...register('website_url')} className="input" placeholder="https://yourbusiness.com" />
+                <Field label="Business website" required error={errors.website_url?.message}>
+                  <input {...register('website_url')} className="input" placeholder="https://example.com" />
                 </Field>
 
-                <div className="space-y-3">
-                  <Label>Business location <span className="text-zinc-500">(Required)</span></Label>
-                  <p className="text-xs text-zinc-500">Your market changes by area. This keeps the benchmark fair.</p>
-                  <Field label="Street address (optional)" helper="Optional, but improves location accuracy.">
-                    <input {...register('business_address')} className="input" placeholder="Street address (optional)" />
-                  </Field>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <Field label="City" required error={errors.city?.message}>
-                      <input {...register('city')} className="input" placeholder="City" />
-                    </Field>
-                    <Field label="State / Region" required error={errors.state_province?.message}>
-                      <input {...register('state_province')} className="input" placeholder="State / Region" />
-                    </Field>
-                  </div>
-                  <Field label="ZIP / Postal code" required error={errors.postal_code?.message}>
-                    <input {...register('postal_code')} className="input" placeholder="ZIP / Postal code" />
-                  </Field>
-                </div>
-
-                <Field
-                  label="What do you sell most?"
-                  required
-                  helper="Keep it simple. One line is enough."
-                  error={errors.what_they_sell?.message}
-                >
+                <Field label="What do you sell most?" required error={errors.what_they_sell?.message}>
                   <input {...register('what_they_sell')} className="input" placeholder="Your main service or offer" />
                 </Field>
 
-                <Field
-                  label="Where do you serve customers?"
-                  required
-                  helper="Keeps the comparison fair and relevant."
-                  error={errors.service_area?.message}
-                >
-                  <Segmented
-                    value={serviceArea}
-                    onChange={(v) => setValue('service_area', v as IntakeData['service_area'], { shouldValidate: true })}
-                    options={SERVICE_AREA_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-                  />
+                <Field label="Street address" required error={errors.street_address?.message}>
+                  <input {...register('street_address')} className="input" placeholder="123 Main St, Suite 200" />
                 </Field>
 
-                {serviceArea === 'multiple_cities' && (
-                  <Field
-                    label="List the cities / regions you serve"
-                    required
-                    error={errors.service_area_notes?.message}
-                  >
-                    <textarea
-                      {...register('service_area_notes')}
-                      className="input min-h-24"
-                      placeholder="City, State • City, State • Region"
-                    />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="City" required error={errors.city?.message}>
+                    <input {...register('city')} className="input" placeholder="City" />
                   </Field>
-                )}
+
+                  <Field label="State" required error={errors.state_province?.message}>
+                    <input {...register('state_province')} className="input" placeholder="State" />
+                  </Field>
+                </div>
+
+                <Field label="ZIP / Postal code" required error={errors.postal_code?.message}>
+                  <input {...register('postal_code')} className="input" placeholder="ZIP / Postal code" />
+                </Field>
               </>
             )}
 
             {step === 1 && (
               <>
                 <div className="space-y-2">
-                  <Label>List your main services (optional)</Label>
-                  <p className="text-xs text-zinc-500">If you want cleaner recommendations, list your top services.</p>
+                  <Label>Main services (optional)</Label>
                   <div className="flex gap-2">
                     <input
                       value={serviceDraft}
                       onChange={(e) => setServiceDraft(e.target.value)}
                       className="input"
-                      placeholder="Add a service"
+                      placeholder="e.g. Plumbing, Dental, Landscaping"
                     />
                     <button type="button" onClick={addService} className="px-3 rounded-md border text-sm font-medium">
                       <Plus className="w-4 h-4" />
@@ -367,24 +265,14 @@ export default function NewAuditPage() {
                   )}
                 </div>
 
-                <Field
-                  label="Roughly how many jobs / appointments do you do per month?"
-                  required
-                  helper="Estimates are fine. We just need the range."
-                  error={errors.jobs_min?.message || errors.jobs_max?.message}
-                >
+                <Field label="Roughly how many jobs / appointments do you do per month?" required error={errors.jobs_min?.message || errors.jobs_max?.message}>
                   <div className="grid grid-cols-2 gap-3">
-                    <input type="number" {...register('jobs_min', { valueAsNumber: true })} className="input" placeholder="Min (e.g., 40)" />
-                    <input type="number" {...register('jobs_max', { valueAsNumber: true })} className="input" placeholder="Max (e.g., 120)" />
+                    <input type="number" {...register('jobs_min', { valueAsNumber: true })} className="input" placeholder="Min" />
+                    <input type="number" {...register('jobs_max', { valueAsNumber: true })} className="input" placeholder="Max" />
                   </div>
                 </Field>
 
-                <Field
-                  label="How fast can customers usually get booked?"
-                  required
-                  helper="Speed changes what customers will pay."
-                  error={errors.availability?.message}
-                >
+                <Field label="How fast can customers usually get booked?" required error={errors.availability?.message}>
                   <select {...register('availability')} className="input">
                     {AVAILABILITY_OPTIONS.map((option) => (
                       <option key={option}>{option}</option>
@@ -396,205 +284,104 @@ export default function NewAuditPage() {
 
             {step === 2 && (
               <>
-                <Field
-                  label="Average customer total (per job / visit)"
-                  required
-                  helper="What you typically collect per customer."
-                  error={errors.ticket_min?.message || errors.ticket_max?.message}
-                >
+                <Field label="Average customer total (per job / visit)" required error={errors.ticket_min?.message || errors.ticket_max?.message}>
                   <div className="grid grid-cols-2 gap-3">
-                    <input type="number" {...register('ticket_min', { valueAsNumber: true })} className="input" placeholder="Min (e.g., 150)" />
-                    <input type="number" {...register('ticket_max', { valueAsNumber: true })} className="input" placeholder="Max (e.g., 500)" />
+                    <input type="number" {...register('ticket_min', { valueAsNumber: true })} className="input" placeholder="Min" />
+                    <input type="number" {...register('ticket_max', { valueAsNumber: true })} className="input" placeholder="Max" />
                   </div>
                 </Field>
 
-                <Field
-                  label="Price range for your main service"
-                  required
-                  helper="Used to spot underpricing and missed upgrades."
-                  error={errors.main_service_min?.message || errors.main_service_max?.message}
-                >
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="number" {...register('main_service_min', { valueAsNumber: true })} className="input" placeholder="Min (e.g., 500)" />
-                    <input type="number" {...register('main_service_max', { valueAsNumber: true })} className="input" placeholder="Max (e.g., 2,500)" />
-                  </div>
-                </Field>
-
-                <Field
-                  label="Do you charge a consult / assessment fee?"
-                  required
-                  helper="Helps set expectations and filter low-intent leads."
-                  error={errors.consult_fee_enabled?.message || errors.consult_fee_amount?.message}
-                >
-                  <Segmented
-                    value={consultFeeEnabled ? 'yes' : 'no'}
-                    onChange={(v) => {
-                      const enabled = v === 'yes';
-                      setValue('consult_fee_enabled', enabled, { shouldValidate: true });
-                      if (!enabled) setValue('consult_fee_amount', undefined, { shouldValidate: true });
-                    }}
-                    options={[
-                      { label: 'Yes', value: 'yes' },
-                      { label: 'No', value: 'no' },
-                    ]}
-                  />
-                </Field>
-
-                {consultFeeEnabled && (
-                  <Field label="Consult / assessment fee" required error={errors.consult_fee_amount?.message}>
-                    <input
-                      type="number"
-                      {...register('consult_fee_amount', { valueAsNumber: true })}
-                      className="input"
-                      placeholder="e.g., 150"
-                    />
-                  </Field>
-                )}
-
-                <Field
-                  label="Do you show prices on your website?"
-                  required
-                  helper="This affects trust and conversions."
-                  error={errors.public_pricing?.message}
-                >
-                  <Segmented
-                    value={watch('public_pricing')}
-                    onChange={(v) => setValue('public_pricing', v as IntakeData['public_pricing'], { shouldValidate: true })}
-                    options={[
-                      { label: 'Yes', value: 'yes' },
-                      { label: 'Some', value: 'some' },
-                      { label: 'No', value: 'no' },
-                    ]}
-                  />
+                <Field label="Diagnostic / Trip fee (optional)" error={errors.trip_fee?.message}>
+                  <input {...register('trip_fee')} className="input" placeholder="Optional amount" />
                 </Field>
               </>
             )}
 
             {step === 3 && (
               <>
-                <Field
-                  label="Do you offer packages or bundles?"
-                  required
-                  helper="Packages often raise profit per customer."
-                  error={errors.packages_status?.message}
-                >
-                  <Segmented
-                    value={packagesStatus}
-                    onChange={(v) => setValue('packages_status', v as IntakeData['packages_status'], { shouldValidate: true })}
-                    options={statusOptions()}
-                  />
+                <Field label="Do you offer packages or bundles?" required error={errors.has_packages?.message}>
+                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
+                    <input type="checkbox" {...register('has_packages')} className="h-4 w-4" />
+                    Yes, we offer packages/bundles
+                  </label>
                 </Field>
-                {packagesStatus === 'yes' && (
-                  <Field label="List your packages (optional)">
-                    <textarea {...register('packages_notes')} className="input min-h-24" placeholder="Package name + what’s included" />
-                  </Field>
-                )}
 
-                <Field
-                  label="Do you offer add-ons or upgrades?"
-                  required
-                  helper="Add-ons are often high-margin."
-                  error={errors.addons_status?.message}
-                >
-                  <Segmented
-                    value={addonsStatus}
-                    onChange={(v) => setValue('addons_status', v as IntakeData['addons_status'], { shouldValidate: true })}
-                    options={statusOptions()}
-                  />
-                </Field>
-                {addonsStatus === 'yes' && (
-                  <Field label="List your add-ons (optional)">
-                    <textarea {...register('addons_notes')} className="input min-h-24" placeholder="Add-on name + price (if you want)" />
-                  </Field>
-                )}
+                {hasPackages && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label>Packages</Label>
+                      <button type="button" onClick={addPackage} className="px-3 py-1 rounded-md border text-sm">
+                        Add package
+                      </button>
+                    </div>
 
-                <Field
-                  label="Do you have a membership / subscription?"
-                  required
-                  helper="Recurring revenue stabilizes your month."
-                  error={errors.membership_status?.message}
-                >
-                  <Segmented
-                    value={membershipStatus}
-                    onChange={(v) => setValue('membership_status', v as IntakeData['membership_status'], { shouldValidate: true })}
-                    options={statusOptions()}
-                  />
-                </Field>
-                {membershipStatus === 'yes' && (
-                  <div className="grid gap-4">
-                    <Field label="Membership price">
-                      <input {...register('membership_price')} className="input" placeholder="e.g., 49/mo" />
-                    </Field>
-                    <Field label="What’s included? (optional)">
-                      <textarea {...register('membership_notes')} className="input min-h-20" placeholder="What members get" />
-                    </Field>
+                    {packages.map((pkg, idx) => (
+                      <div key={idx} className="rounded-lg border p-3 space-y-2">
+                        <input
+                          className="input"
+                          placeholder="Package name"
+                          value={pkg.name || ''}
+                          onChange={(e) => updatePackageField(idx, 'name', e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Price (optional)"
+                          value={pkg.price || ''}
+                          onChange={(e) => updatePackageField(idx, 'price', e.target.value)}
+                        />
+                        <textarea
+                          className="input min-h-20"
+                          placeholder="Includes (optional, one per line)"
+                          defaultValue={(pkg.includes || []).join('\n')}
+                          onChange={(e) => updatePackageIncludes(idx, e.target.value)}
+                        />
+                        <button type="button" onClick={() => removePackage(idx)} className="btn-secondary">
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                <Field
-                  label="Do you offer a guarantee / warranty?"
-                  required
-                  helper="A clear promise supports premium pricing."
-                  error={errors.warranty_status?.message}
-                >
-                  <Segmented
-                    value={warrantyStatus}
-                    onChange={(v) => setValue('warranty_status', v as IntakeData['warranty_status'], { shouldValidate: true })}
-                    options={statusOptions()}
-                  />
-                </Field>
-                {warrantyStatus === 'yes' && (
-                  <Field label="Describe it (optional)">
-                    <textarea {...register('warranty_notes')} className="input min-h-20" placeholder="Short description" />
-                  </Field>
-                )}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
+                    <input type="checkbox" {...register('has_membership')} className="h-4 w-4" />
+                    We offer a membership
+                  </label>
+                  <label className="flex items-center gap-2 text-sm rounded-lg border p-3">
+                    <input type="checkbox" {...register('has_priority')} className="h-4 w-4" />
+                    We offer priority service
+                  </label>
+                </div>
 
-                <Field
-                  label="What’s the biggest pricing problem right now? (optional)"
-                  helper="This helps tailor your recommendations."
-                >
-                  <textarea {...register('pricing_problem')} className="input min-h-24" placeholder="Example: Busy, but margins feel thin." />
+                <Field label="Warranty / guarantee (optional)" error={errors.warranty?.message}>
+                  <textarea {...register('warranty')} className="input min-h-24" placeholder="Short description" />
                 </Field>
               </>
             )}
 
             {step === 4 && (
-              <div className="space-y-4">
-                <ReviewCard title="Market setup" rows={[
-                  ['Website', summary.website],
-                  ['City/State/ZIP', summary.location],
-                  ['Service area', summary.serviceArea],
-                ]} />
-                <ReviewCard title="What you sell most" rows={[[ 'Main offer', summary.whatTheySell ]]} />
-                <ReviewCard title="Volume" rows={[
-                  ['Jobs/month range', summary.jobsRange],
-                  ['Booking speed', summary.bookingSpeed],
-                ]} />
-                <ReviewCard title="Pricing" rows={[
-                  ['Avg ticket range', summary.avgTicketRange],
-                  ['Main service price range', summary.mainRange],
-                  ['Consult fee', summary.consultFee],
-                  ['Public pricing', summary.publicPricing],
-                ]} />
-                <ReviewCard title="Offer levers" rows={[
-                  ['Packages', prettyStatus(summary.offerLevers.packages)],
-                  ['Add-ons', prettyStatus(summary.offerLevers.addons)],
-                  ['Membership', prettyStatus(summary.offerLevers.membership)],
-                  ['Guarantee', prettyStatus(summary.offerLevers.warranty)],
-                ]} />
-              </div>
+              <>
+                <Field label="What is your biggest pricing frustration? (optional)" error={errors.pricing_frustration?.message}>
+                  <textarea {...register('pricing_frustration')} className="input min-h-24" placeholder="Tell us what feels hardest right now" />
+                </Field>
+
+                <Field label="Known competitors (optional)" error={errors.known_competitors?.message}>
+                  <textarea {...register('known_competitors')} className="input min-h-24" placeholder="Names or links (optional)" />
+                </Field>
+              </>
             )}
 
             {error && <p className="text-sm text-rose-600">{error}</p>}
           </div>
 
           <div className="sticky bottom-0 border-t bg-white px-6 md:px-8 py-4 flex items-center justify-between">
-            <button type="button" onClick={backStep} disabled={step === 0} className="btn-secondary disabled:opacity-40">
+            <button type="button" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} className="btn-secondary disabled:opacity-40">
               Back
             </button>
 
             {step < 4 ? (
-              <button type="button" onClick={nextStep} className="btn-primary">
+              <button type="button" onClick={goNext} className="btn-primary">
                 Next step
               </button>
             ) : (
@@ -612,47 +399,6 @@ export default function NewAuditPage() {
   );
 }
 
-function statusOptions() {
-  return [
-    { label: 'Yes', value: 'yes' },
-    { label: 'No', value: 'no' },
-    { label: 'Not sure', value: 'not_sure' },
-  ];
-}
-
-function prettyStatus(v?: string) {
-  if (v === 'yes') return 'Yes';
-  if (v === 'no') return 'No';
-  return 'Not sure';
-}
-
-function Segmented({
-  value,
-  onChange,
-  options,
-}: {
-  value?: string;
-  onChange: (next: string) => void;
-  options: { label: string; value: string }[];
-}) {
-  return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => onChange(opt.value)}
-          className={`rounded-md border px-3 py-2 text-sm text-left transition-colors ${
-            value === opt.value ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-300 hover:border-zinc-400'
-          }`}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-sm font-medium text-zinc-900">{children}</label>;
 }
@@ -660,13 +406,11 @@ function Label({ children }: { children: React.ReactNode }) {
 function Field({
   label,
   required,
-  helper,
   error,
   children,
 }: {
   label: string;
   required?: boolean;
-  helper?: string;
   error?: string;
   children: React.ReactNode;
 }) {
@@ -676,24 +420,7 @@ function Field({
         {label} {required && <span className="text-zinc-500">(Required)</span>}
       </Label>
       {children}
-      {helper && <p className="text-xs text-zinc-500">{helper}</p>}
       {error && <p className="text-xs text-rose-600">{error}</p>}
-    </div>
-  );
-}
-
-function ReviewCard({ title, rows }: { title: string; rows: [string, string][] }) {
-  return (
-    <div className="rounded-xl border p-4">
-      <h3 className="text-sm font-semibold mb-3">{title}</h3>
-      <div className="space-y-2">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex items-start justify-between gap-4 text-sm">
-            <span className="text-zinc-500">{label}</span>
-            <span className="text-zinc-900 font-medium text-right">{value || '—'}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
