@@ -1,3 +1,9 @@
+import { z } from "zod";
+
+/* =============================
+   INTAKE (ONBOARDING) SCHEMA
+============================= */
+
 export const IntakeSchema = z
   .object({
     website_url: z.string().url(),
@@ -113,3 +119,36 @@ export const IntakeSchema = z
   });
 
 export type IntakeData = z.infer<typeof IntakeSchema>;
+
+/* =============================
+   MARKET EXTRACTION SCHEMAS
+   (worker dependency)
+============================= */
+
+const EvidenceTypeSchema = z.enum(["pricing", "service", "reputation", "guarantee", "other"]);
+
+export const CompetitorSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  services: z.array(z.string()).optional().default([]),
+  pricing_signals: z.array(z.string()).optional().default([]),
+  trip_fee: z.string().nullable().optional().default(null),
+  membership_offer: z.string().nullable().optional().default(null),
+  warranty_offer: z.string().nullable().optional().default(null),
+  premium_signals: z.array(z.string()).optional().default([]),
+  evidence_ids: z.array(z.string()).optional().default([]),
+});
+
+const EvidenceSchema = z.object({
+  id: z.string().default(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`)),
+  source_url: z.string().default(""),
+  snippet: z.string().default(""),
+  type: EvidenceTypeSchema,
+});
+
+export const ExtractedDataSchema = z.object({
+  competitors: z.array(CompetitorSchema).optional().default([]),
+  evidence: z.array(EvidenceSchema).optional().default([]),
+});
+
+export type ExtractedData = z.infer<typeof ExtractedDataSchema>;
