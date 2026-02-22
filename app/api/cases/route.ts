@@ -3,9 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { IntakeSchema } from "@/shared/schema/extractor.zod";
 
 function availabilityToLegacy(v: string) {
-  if (v === "Same day") return "Same Day";
-  if (v === "Next day") return "Next Day";
-  if (v === "2–3 days") return "2-3 Days";
+  if (v === "Same Day") return "Same Day";
+  if (v === "Next Day") return "Next Day";
+  if (v === "2-3 Days") return "2-3 Days";
   return "1 Week+";
 }
 
@@ -21,17 +21,28 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Normalize inputs to the canonical schema field names expected by IntakeSchema.
-    // Canonical choice: state_province (NOT state_region).
+    // Normalize common alternate keys into canonical IntakeSchema keys
     const payload = {
       ...body,
-      website_url: body.website_url ?? body.websiteUrl,
-      street_address: body.street_address ?? body.streetAddress,
-      city: body.city,
-      state_province:
-        body.state_province ?? body.stateProvince ?? body.state_region ?? body.stateRegion,
-      postal_code: body.postal_code ?? body.postalCode ?? body.zip ?? body.zip_code ?? body.zipCode,
-      what_they_sell: body.what_they_sell ?? body.whatTheySell,
+      website_url: body.website_url ?? body.websiteUrl ?? "",
+      what_they_sell: body.what_they_sell ?? body.whatTheySell ?? "",
+
+      // Address (canonical)
+      street_address: body.street_address ?? body.streetAddress ?? "",
+      city: body.city ?? "",
+      state_province: body.state_province ?? body.stateProvince ?? body.state_region ?? body.stateRegion ?? "",
+      postal_code: body.postal_code ?? body.postalCode ?? body.zip ?? body.zip_code ?? body.zipCode ?? "",
+
+      // Numbers
+      jobs_min: body.jobs_min ?? body.jobsMin,
+      jobs_max: body.jobs_max ?? body.jobsMax,
+      ticket_min: body.ticket_min ?? body.ticketMin,
+      ticket_max: body.ticket_max ?? body.ticketMax,
+
+      // Defaults handled by schema, but normalize if UI sends variants
+      availability: body.availability ?? "Same Day",
+      service_area: body.service_area ?? body.serviceArea ?? "local_only",
+      service_area_notes: body.service_area_notes ?? body.serviceAreaNotes ?? null,
     };
 
     const result = IntakeSchema.safeParse(payload);
@@ -58,33 +69,27 @@ export async function POST(req: Request) {
       ...rawVitals
     } = validated as any;
 
-    // Keep backward-compatible vitals fields used by worker/scoring.
+    // Keep vitals compatible with your worker/scoring expectations
     const legacyCompatVitals = {
       ...rawVitals,
 
-      // legacy key expected elsewhere:
-      state_province: state_province,
-
-      // keep both for old code paths that might read either:
-      state_region: state_province,
-
-      // legacy availability formatting used in older prompts/UI:
+      // legacy-ish keys some code might still read
+      state_province,
       availability_legacy: availabilityToLegacy(validated.availability),
       availability: availabilityToLegacy(validated.availability),
 
-      // compatibility field for older worker expectations:
+      // If consult fee is enabled, store as trip_fee string for legacy logic
       trip_fee:
         validated.consult_fee_enabled && validated.consult_fee_amount != null
           ? String(validated.consult_fee_amount)
-          : null,
+          : (validated.trip_fee ?? null),
 
-      has_membership: validated.membership_status === "yes",
-      has_priority: false,
+      has_membership: validated.membership_status === "yes" || validated.has_membership === true,
+      has_priority: validated.has_priority === true,
 
       service_area_label: serviceAreaLabel(validated.service_area),
     };
 
-    // Include street address for better precision (Option B you wanted)
     const location = `${street_address}, ${city}, ${state_province} ${postal_code}`.trim();
 
     const newCase = await prisma.case.create({
@@ -94,7 +99,7 @@ export async function POST(req: Request) {
         whatTheySell: what_they_sell,
         vitals: legacyCompatVitals as any,
         proInputs: {
-          ...body,
+          raw: body,
           normalized: validated,
         } as any,
       },
