@@ -60,7 +60,7 @@ const STEP_META: StepMeta[] = [
     title: 'Offer Structure',
     subtitle: 'These levers usually move profit fast.',
     icon: Target,
-    fields: [], // validated on submit by schema; this step is mostly optional levers
+    fields: [],
   },
   {
     title: 'Final Notes',
@@ -225,10 +225,10 @@ export default function NewAuditPage() {
   const errorBase =
     "border-red-300 focus:border-red-500 focus:ring-red-500/10 hover:border-red-400 bg-red-50/20";
 
-  // Helpers: set + clear error
-  const setField = <K extends keyof IntakeData>(key: K, value: IntakeData[K]) => {
-    setValue(key, value, { shouldDirty: true, shouldTouch: true });
-    clearErrors(key);
+  // FIX: remove generic typing headache -> use any internally (safe for UI)
+  const setFieldAny = (key: keyof IntakeData, value: any) => {
+    setValue(key as any, value as any, { shouldDirty: true, shouldTouch: true });
+    clearErrors(key as any);
   };
 
   // --- Dynamic Array Handlers ---
@@ -281,7 +281,6 @@ export default function NewAuditPage() {
 
     const fields = [...current.fields];
 
-    // When multiple cities, notes must be present
     if (step === 1 && serviceArea === 'multiple_cities') {
       fields.push('service_area_notes');
     }
@@ -305,7 +304,7 @@ export default function NewAuditPage() {
     setStep((s) => Math.max(s - 1, 0));
   };
 
-  // --- Real submit (no mock) ---
+  // --- Real submit ---
   const onSubmit = async (form: IntakeData) => {
     setTopError('');
     setIsSubmitting(true);
@@ -333,7 +332,7 @@ export default function NewAuditPage() {
     }
   };
 
-  // --- Submitting screen (Gemini style) ---
+  // --- Submitting screen ---
   if (isSubmitting) {
     return (
       <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center p-6 relative overflow-hidden">
@@ -576,7 +575,7 @@ export default function NewAuditPage() {
                           key={o.value}
                           title={o.label}
                           selected={serviceArea === (o.value as any)}
-                          onClick={() => setField('service_area', o.value as any)}
+                          onClick={() => setFieldAny('service_area', o.value)}
                         />
                       ))}
                     </div>
@@ -659,13 +658,13 @@ export default function NewAuditPage() {
                         title="Yes, we have packages"
                         description="Bundles customers can choose from"
                         selected={hasPackages === true}
-                        onClick={() => setField('has_packages', true as any)}
+                        onClick={() => setFieldAny('has_packages', true)}
                       />
                       <SelectableCard
                         title="No, services are separate"
                         description="Customers pay per service / per job"
                         selected={hasPackages === false}
-                        onClick={() => setField('has_packages', false as any)}
+                        onClick={() => setFieldAny('has_packages', false)}
                       />
                     </div>
                   </Field>
@@ -743,13 +742,13 @@ export default function NewAuditPage() {
                       title="We offer memberships"
                       description="Recurring revenue option"
                       selected={Boolean(watch('has_membership'))}
-                      onClick={() => setField('has_membership', (!Boolean(watch('has_membership'))) as any)}
+                      onClick={() => setFieldAny('has_membership', !Boolean(watch('has_membership')))}
                     />
                     <SelectableCard
                       title="We offer priority service"
                       description="After-hours / expedited option"
                       selected={Boolean(watch('has_priority'))}
-                      onClick={() => setField('has_priority', (!Boolean(watch('has_priority'))) as any)}
+                      onClick={() => setFieldAny('has_priority', !Boolean(watch('has_priority')))}
                     />
                   </div>
 
@@ -810,7 +809,7 @@ export default function NewAuditPage() {
               ) : null}
             </div>
 
-            {/* Floating Action Footer (inside form so submit works) */}
+            {/* Floating Action Footer */}
             <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-2xl border-t border-zinc-200/80 p-4 sm:p-6 flex justify-center transform-gpu">
               <div className="w-full max-w-3xl flex items-center justify-between px-2 sm:px-4">
                 <button
