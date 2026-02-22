@@ -85,9 +85,10 @@ export default function NewAuditPage() {
     defaultValues: DEFAULT_VALUES,
   });
 
-  const services = (watch('services') as IntakeData['services']) || [];
-  const hasPackages = !!watch('has_packages');
-  const packages = (watch('packages') as IntakeData['packages']) || [];
+  // ✅ Explicitly type watch() outputs so TS never infers any/unknown
+  const services = (watch('services') ?? []) as Array<{ name: string; price?: string }>;
+  const packages = (watch('packages') ?? []) as Array<{ name: string; price?: string; includes?: string[] }>;
+  const hasPackages = Boolean(watch('has_packages'));
 
   const progress = useMemo(() => ((step + 1) / STEP_META.length) * 100, [step]);
   const current = STEP_META[step];
@@ -100,7 +101,11 @@ export default function NewAuditPage() {
   };
 
   const removeService = (index: number) => {
-    setValue('services', services.filter((svc, i) => i !== index), { shouldDirty: true });
+    setValue(
+      'services',
+      services.filter((_svc: { name: string; price?: string }, i: number) => i !== index),
+      { shouldDirty: true }
+    );
   };
 
   const addPackage = () => {
@@ -108,7 +113,11 @@ export default function NewAuditPage() {
   };
 
   const removePackage = (index: number) => {
-    setValue('packages', packages.filter((pkg, i) => i !== index), { shouldDirty: true });
+    setValue(
+      'packages',
+      packages.filter((_pkg: { name: string; price?: string; includes?: string[] }, i: number) => i !== index),
+      { shouldDirty: true }
+    );
   };
 
   const updatePackageField = (index: number, key: 'name' | 'price', value: string) => {
@@ -243,13 +252,11 @@ export default function NewAuditPage() {
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
+
                   {!!services.length && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {services.map((svc, idx) => (
-                        <span
-                          key={`${svc.name}-${idx}`}
-                          className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1 text-xs"
-                        >
+                        <span key={`${svc.name}-${idx}`} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1 text-xs">
                           {svc.name}
                           <button type="button" onClick={() => removeService(idx)} aria-label="Remove service">
                             <X className="w-3 h-3" />
@@ -367,15 +374,8 @@ export default function NewAuditPage() {
 
             {step === 4 && (
               <>
-                <Field
-                  label="What is your biggest pricing frustration? (optional)"
-                  error={errors.pricing_frustration?.message}
-                >
-                  <textarea
-                    {...register('pricing_frustration')}
-                    className="input min-h-24"
-                    placeholder="Tell us what feels hardest right now"
-                  />
+                <Field label="What is your biggest pricing frustration? (optional)" error={errors.pricing_frustration?.message}>
+                  <textarea {...register('pricing_frustration')} className="input min-h-24" placeholder="Tell us what feels hardest right now" />
                 </Field>
 
                 <Field label="Known competitors (optional)" error={errors.known_competitors?.message}>
