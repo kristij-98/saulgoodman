@@ -15,14 +15,6 @@ type StepMeta = {
 
 const AVAILABILITY_OPTIONS = ['Same Day', 'Next Day', '2-3 Days', '1 Week+'] as const;
 
-const SERVICE_AREA_OPTIONS = [
-  { value: 'local_only', label: 'Local only (near me)' },
-  { value: 'within_10_miles', label: 'Within 10 miles / 15 km' },
-  { value: 'within_25_miles', label: 'Within 25 miles / 40 km' },
-  { value: 'within_50_miles', label: 'Within 50 miles / 80 km' },
-  { value: 'multiple_cities', label: 'Multiple cities / regions' },
-] as const;
-
 const STEP_META: StepMeta[] = [
   {
     title: 'Business basics',
@@ -32,7 +24,7 @@ const STEP_META: StepMeta[] = [
   {
     title: 'Services & volume',
     subtitle: 'A clear volume range helps expose hidden margin.',
-    fields: ['jobs_min', 'jobs_max', 'availability', 'service_area'],
+    fields: ['jobs_min', 'jobs_max', 'availability'],
   },
   {
     title: 'Pricing snapshot',
@@ -51,47 +43,26 @@ const STEP_META: StepMeta[] = [
   },
 ];
 
-const DEFAULT_VALUES: IntakeData = {
+const DEFAULT_VALUES: Partial<IntakeData> = {
   website_url: '',
   what_they_sell: '',
-
   street_address: '',
   city: '',
   state_province: '',
   postal_code: '',
-
+  services: [],
   jobs_min: 10,
   jobs_max: 50,
-
   availability: 'Same Day',
-
   ticket_min: 150,
   ticket_max: 500,
-
-  service_area: 'local_only',
-  service_area_notes: '',
-
-  services: [],
-
-  public_pricing: 'some',
-  consult_fee_enabled: false,
-  consult_fee_amount: undefined,
-
-  packages_status: 'not_sure',
-  addons_status: 'not_sure',
-  membership_status: 'not_sure',
-  warranty_status: 'not_sure',
-
   trip_fee: '',
-  warranty: '',
-
+  has_packages: false,
+  packages: [],
   has_membership: false,
   has_priority: false,
-  has_packages: false,
-
-  packages: [],
-
-  pricing_problem: '',
+  warranty: '',
+  pricing_frustration: '',
   known_competitors: '',
 };
 
@@ -112,13 +83,11 @@ export default function NewAuditPage() {
   } = useForm<IntakeData>({
     resolver: zodResolver(IntakeSchema),
     defaultValues: DEFAULT_VALUES,
-    mode: 'onChange',
   });
 
-  const services = watch('services') || [];
+  const services = (watch('services') as IntakeData['services']) || [];
   const hasPackages = !!watch('has_packages');
-  const packages = watch('packages') || [];
-  const serviceArea = watch('service_area');
+  const packages = (watch('packages') as IntakeData['packages']) || [];
 
   const progress = useMemo(() => ((step + 1) / STEP_META.length) * 100, [step]);
   const current = STEP_META[step];
@@ -131,11 +100,7 @@ export default function NewAuditPage() {
   };
 
   const removeService = (index: number) => {
-    setValue(
-      'services',
-      services.filter((_, i) => i !== index),
-      { shouldDirty: true }
-    );
+    setValue('services', services.filter((svc, i) => i !== index), { shouldDirty: true });
   };
 
   const addPackage = () => {
@@ -143,11 +108,7 @@ export default function NewAuditPage() {
   };
 
   const removePackage = (index: number) => {
-    setValue(
-      'packages',
-      packages.filter((_, i) => i !== index),
-      { shouldDirty: true }
-    );
+    setValue('packages', packages.filter((pkg, i) => i !== index), { shouldDirty: true });
   };
 
   const updatePackageField = (index: number, key: 'name' | 'price', value: string) => {
@@ -168,19 +129,14 @@ export default function NewAuditPage() {
 
   const goNext = async () => {
     const fields = [...current.fields];
-
-    // If they selected multiple cities, notes become required (schema enforces too)
-    if (step === 1 && serviceArea === 'multiple_cities') {
-      fields.push('service_area_notes' as any);
-    }
-
     const valid = fields.length ? await trigger(fields as any) : true;
     if (!valid) return;
-
     setStep((s) => Math.min(s + 1, STEP_META.length - 1));
   };
 
-  const goBack = () => setStep((s) => Math.max(s - 1, 0));
+  const goBack = () => {
+    setStep((s) => Math.max(s - 1, 0));
+  };
 
   const onSubmit = async (data: IntakeData) => {
     setError('');
@@ -287,7 +243,6 @@ export default function NewAuditPage() {
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-
                   {!!services.length && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {services.map((svc, idx) => (
@@ -325,26 +280,6 @@ export default function NewAuditPage() {
                     ))}
                   </select>
                 </Field>
-
-                <Field label="Where do you serve customers?" required error={(errors as any).service_area?.message}>
-                  <select {...register('service_area')} className="input">
-                    {SERVICE_AREA_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                {serviceArea === 'multiple_cities' && (
-                  <Field label="List the cities / regions you serve" required error={(errors as any).service_area_notes?.message}>
-                    <textarea
-                      {...register('service_area_notes')}
-                      className="input min-h-24"
-                      placeholder="City, State • City, State • Region"
-                    />
-                  </Field>
-                )}
               </>
             )}
 
@@ -432,11 +367,14 @@ export default function NewAuditPage() {
 
             {step === 4 && (
               <>
-                <Field label="What’s the biggest pricing problem right now? (optional)" error={(errors as any).pricing_problem?.message}>
+                <Field
+                  label="What is your biggest pricing frustration? (optional)"
+                  error={errors.pricing_frustration?.message}
+                >
                   <textarea
-                    {...register('pricing_problem')}
+                    {...register('pricing_frustration')}
                     className="input min-h-24"
-                    placeholder="Example: Busy, but margins feel thin."
+                    placeholder="Tell us what feels hardest right now"
                   />
                 </Field>
 
@@ -454,7 +392,7 @@ export default function NewAuditPage() {
               Back
             </button>
 
-            {step < STEP_META.length - 1 ? (
+            {step < 4 ? (
               <button type="button" onClick={goNext} className="btn-primary">
                 Next step
               </button>
